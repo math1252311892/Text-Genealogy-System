@@ -1,0 +1,1436 @@
+<html lang="zh-CN"><head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>文本溯源系统4</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 更新Font Awesome到最新版本 -->
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    
+    <!-- 配置Tailwind自定义颜色和字体 -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#2563EB',
+                        secondary: '#059669',
+                        neutral: '#1E293B',
+                        llm: '#7C3AED',
+                        accent: '#4F46E5',
+                        correction: '#DC2626',
+                        delete: '#EF4444',
+                        insert: '#10B981',
+                        replace: '#F59E0B'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .content-auto { content-visibility: auto; }
+            .card-hover { @apply transition-all duration-300 hover:shadow-lg hover:-translate-y-1; }
+            .text-shadow { text-shadow: 0 2px 10px rgba(0, 0, 0, 0.1); }
+            .bg-pattern {
+                background-color: #f8fafc;
+                background-image: 
+                    radial-gradient(rgba(37, 99, 235, 0.05) 1px, transparent 1px),
+                    radial-gradient(rgba(124, 58, 237, 0.05) 1px, transparent 1px);
+                background-size: 50px 50px;
+                background-position: 0 0, 25px 25px;
+            }
+            .title-underline {
+                position: relative;
+            }
+            .title-underline::after {
+                content: '';
+                position: absolute;
+                bottom: -6px;
+                left: 50%;
+                transform: translateX(-50%);
+                width: 60px;
+                height: 3px;
+                background: linear-gradient(90deg, #2563EB, #7C3AED);
+                border-radius: 3px;
+            }
+            .toggle-checkbox:checked { right: 0; border-color: #7C3AED; }
+            .toggle-checkbox:checked + .toggle-label { background-color: #7C3AED; }
+            .result-card { @apply bg-white rounded-xl p-5 border border-gray-100 shadow-sm hover:shadow-md transition-all duration-300; }
+            .page-transition { transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1); }
+            .subnav-btn-active { @apply bg-primary text-white shadow-md; }
+            .collapsible-content { max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; }
+            .collapsible-open .collapsible-content { max-height: 2000px; }
+            .collapsible-icon { transition: transform 0.3s ease; }
+            .collapsible-open .collapsible-icon { transform: rotate(180deg); }
+            .strikethrough { 
+                text-decoration: line-through; 
+                color: #6B7280; 
+                margin-right: 0.25rem;
+                display: inline;
+            }
+            .correction-highlight {
+                color: #DC2626;
+                font-weight: 500;
+                display: inline;
+                margin-right: 0.25rem;
+            }
+            .correction-block {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                margin-bottom: 0.5rem;
+            }
+            .correction-text-normal {
+                display: inline;
+                margin-right: 0.25rem;
+            }
+            /* 差异可视化样式 */
+            .diff-delete {
+                @apply bg-red-100 text-red-800 line-through px-1 rounded;
+            }
+            .diff-insert {
+                @apply bg-green-100 text-green-800 px-1 rounded;
+            }
+            .diff-replace-old {
+                @apply bg-amber-100 text-amber-800 line-through px-1 rounded mr-1;
+            }
+            .diff-replace-new {
+                @apply bg-amber-100 text-amber-800 px-1 rounded ml-1;
+            }
+            /* 模态框样式 */
+            .modal-backdrop {
+                @apply fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center opacity-0 pointer-events-none transition-opacity duration-300;
+            }
+            .modal-backdrop.active {
+                @apply opacity-100 pointer-events-auto;
+            }
+            .modal-content {
+                @apply bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] transform transition-all duration-300 scale-95 opacity-0;
+            }
+            .modal-backdrop.active .modal-content {
+                @apply scale-100 opacity-100;
+            }
+        }
+    </style>
+</head>
+<body class="bg-pattern font-sans text-neutral min-h-screen overflow-x-hidden">
+    <!-- 引用原文模态框 -->
+    <div id="reference-modal" class="modal-backdrop">
+        <div class="modal-content">
+            <div class="p-5 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-semibold text-accent flex items-center">
+                    <i class="fa fa-link mr-2"></i>引用原文
+                </h3>
+                <button id="close-reference-modal" class="text-gray-500 hover:text-gray-700 transition-colors">
+                    <i class="fa fa-times text-xl"></i>
+                </button>
+            </div>
+            <div id="reference-modal-content" class="p-5 overflow-y-auto max-h-[calc(80vh-120px)]">
+                <!-- 引用原文内容将在这里动态生成 -->
+            </div>
+            <div class="p-4 border-t border-gray-200 flex justify-end">
+                <button id="close-reference-btn" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-medium text-sm transition-all duration-300">
+                    关闭
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 左侧垂直切换按钮 -->
+    <div class="fixed left-0 top-0 h-full flex flex-col items-center justify-center z-40 space-y-8 px-4">
+        <button id="search-page-btn" class="writing-mode: vertical-rl text-orientation: mixed bg-primary text-white px-3 py-6 rounded-lg font-medium transition-all duration-300 shadow-md hover:shadow-lg">
+            <i class="fa fa-search mr-2"></i>文本溯源
+        </button>
+        <button id="entries-page-btn" class="writing-mode: vertical-rl text-orientation: mixed bg-white text-primary px-3 py-6 rounded-lg font-medium transition-all duration-300 shadow-md hover:shadow-lg opacity-70 pointer-events-none">
+            <i class="fa fa-list mr-2"></i>中间结果
+        </button>
+    </div>
+
+    <!-- 页面容器 -->
+    <div class="ml-16 relative">
+        <!-- 合并后的检索页面 -->
+        <div id="search-page" class="page-transition min-h-screen">
+            <!-- 顶部导航 -->
+            <header class="bg-white/80 backdrop-blur-md shadow-sm sticky top-0 z-30">
+                <div class="container mx-auto px-4 py-4 flex justify-between items-center">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-primary to-llm flex items-center justify-center shadow-md">
+                            <i class="fa fa-search text-white text-xl"></i>
+                        </div>
+                        <h1 class="text-xl md:text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-llm">文本溯源系统</h1>
+                    </div>
+                    <div class="hidden md:flex items-center space-x-1 text-sm text-gray-500">
+                        <i class="fa fa-clock-o"></i>
+                        <span id="search-system-status">系统正常运行中</span>
+                    </div>
+                </div>
+            </header>
+
+            <!-- 主要内容区 - 三列布局 -->
+            <main class="container mx-auto px-4 py-8 md:py-16">
+                <div class="max-w-7xl mx-auto">
+                    <div class="mb-8 border-b border-gray-200 pb-4">
+                        <h2 class="text-xl font-semibold text-accent mb-2">
+                            <i class="fa fa-search-plus mr-2"></i>文本溯源
+                        </h2>
+                        <div class="text-sm text-gray-500">
+                            输入需要溯源的内容，系统将为您查找相关知识源并提供智能分析结果
+                        </div>
+                    </div>
+
+                    <!-- 三列布局：功能选择、输入区域、结果区域 -->
+                    <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                        <!-- 第一列：功能选择区域 -->
+                        <div class="lg:col-span-3">
+                            <div class="bg-white rounded-2xl shadow-md p-6 md:p-8 card-hover transform transition-all duration-500 h-full">
+                                <h3 class="text-xl font-semibold mb-6 flex items-center text-accent">
+                                    <i class="fa fa-sliders mr-2"></i>功能选择
+                                </h3>
+                                
+                                <!-- 检索类型选择 -->
+                                <div class="mb-6">
+                                    <div class="collapsible-header bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-100 cursor-pointer p-4 flex justify-between items-center">
+                                        <div class="flex items-center">
+                                            <i class="fa fa-search mr-2 text-primary"></i>
+                                            <label class="text-sm font-medium text-gray-700">知识源</label>
+                                        </div>
+                                        <i class="fa fa-chevron-down text-xs text-gray-500 collapsible-icon"></i>
+                                    </div>
+                                    <div class="collapsible-content mt-2 px-2">
+                                        <div class="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-100">
+                                            <div class="space-y-3">
+                                                <div class="flex items-center">
+                                                    <input type="radio" id="search-type-speech" name="search-type" value="speech" class="w-4 h-4 text-primary focus:ring-primary border-gray-300" checked="">
+                                                    <label for="search-type-speech" class="ml-2 text-sm text-gray-700"><i class="fa fa-microphone text-primary mr-1"></i>重要讲话</label>
+                                                </div>
+                                                <div class="flex items-center">
+                                                    <input type="radio" id="search-type-encyclopedia" name="search-type" value="encyclopedia" class="w-4 h-4 text-accent focus:ring-accent border-gray-300">
+                                                    <label for="search-type-encyclopedia" class="ml-2 text-sm text-gray-700"><i class="fa fa-book text-accent mr-1"></i>知识百科</label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- 功能选择区域：校验/问答 -->
+                                <div class="mb-6">
+                                    <div class="collapsible-header bg-gradient-to-r from-purple-50 to-indigo-50 rounded-xl border border-purple-100 cursor-pointer p-4 flex justify-between items-center">
+                                        <div class="flex items-center">
+                                            <i class="fa fa-cogs mr-2 text-purple-600"></i>
+                                            <label class="text-sm font-medium text-gray-700">处理模式</label>
+                                        </div>
+                                        <i class="fa fa-chevron-down text-xs text-gray-500 collapsible-icon"></i>
+                                    </div>
+                                    <div class="collapsible-content mt-2 px-2">
+                                        <div class="p-4 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-xl border border-purple-100">
+                                            <div class="space-y-3">
+                                                <div class="flex items-center">
+                                                    <input type="radio" id="search-verify-mode" name="search-function-type" value="verify" class="w-4 h-4 text-primary focus:ring-primary border-gray-300" checked="">
+                                                    <label for="search-verify-mode" class="ml-2 text-sm text-gray-700"><i class="fa fa-check-circle text-green-600 mr-1"></i>知识校验</label>
+                                                </div>
+                                                <div class="flex items-center">
+                                                    <input type="radio" id="search-qa-mode" name="search-function-type" value="qa" class="w-4 h-4 text-primary focus:ring-primary border-gray-300">
+                                                    <label for="search-qa-mode" class="ml-2 text-sm text-gray-700"><i class="fa fa-question-circle text-purple-600 mr-1"></i>智能问答</label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- 时间范围选择 - 默认隐藏，仅在选择文本溯源时显示 -->
+                                <div id="time-range-container" class="mb-6">
+                                    <div class="collapsible-header bg-gradient-to-r from-green-50 to-teal-50 rounded-xl border border-green-100 cursor-pointer p-4 flex justify-between items-center">
+                                        <div class="flex items-center">
+                                            <i class="fa fa-calendar mr-2 text-green-600"></i>
+                                            <label class="text-sm font-medium text-gray-700">时间范围（可选）</label>
+                                        </div>
+                                        <i class="fa fa-chevron-down text-xs text-gray-500 collapsible-icon"></i>
+                                    </div>
+                                    <div class="collapsible-content mt-2 px-2">
+                                        <div class="p-4 bg-gradient-to-r from-green-50 to-teal-50 rounded-xl border border-green-100">
+                                            <div class="space-y-4">
+                                                <div>
+                                                    <label for="search-start-time" class="block text-xs text-gray-500 mb-1">开始时间</label>
+                                                    <input type="datetime-local" id="search-start-time" class="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all duration-300 text-sm">
+                                                </div>
+                                                <div>
+                                                    <label for="search-end-time" class="block text-xs text-gray-500 mb-1">结束时间</label></label>
+                                                    <input type="datetime-local" id="search-end-time" class="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all duration-300 text-sm">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- 大模型增强选项 -->
+                                <div class="bg-gradient-to-r from-purple-50 to-blue-50 p-4 rounded-xl border border-purple-100 mt-4">
+                                    <div class="flex items-center justify-between">
+                                        <div class="flex items-center">
+                                            <div class="w-10 h-10 rounded-full bg-llm/10 flex items-center justify-center mr-3">
+                                                <i class="fa fa-lightbulb-o text-llm text-xl"></i>
+                                            </div>
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-800">大模型增强检索</label>
+                                                <p class="text-xs text-gray-500 mt-0.5">启用后可获得更全面的检索结果</p>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- 自定义开关按钮 -->
+                                        <div class="relative inline-block w-12 h-6">
+                                            <input type="checkbox" id="search-use-llm-enhancement" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer transition-all duration-300 checked:right-0 checked:border-llm" checked="">
+                                            <label for="search-use-llm-enhancement" class="toggle-label block overflow-hidden h-6 rounded-full bg-gray-300 cursor-pointer"></label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 第二列：输入区域 -->
+                        <div class="lg:col-span-4">
+                            <div class="bg-white rounded-2xl shadow-md p-6 md:p-8 card-hover transform transition-all duration-500 h-full">
+                                <h3 class="text-xl font-semibold mb-6 flex items-center text-accent">
+                                    <i class="fa fa-pencil-square-o mr-2"></i>输入内容
+                                </h3>
+                                
+                                <!-- 文本输入区域 -->
+                                <div class="space-y-5 mb-8">
+                                    <label for="search-input" class="block text-sm font-medium text-gray-700">输入文本内容</label>
+                                    <textarea id="search-input" class="w-full p-4 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all duration-300 resize-none shadow-sm" rows="16" placeholder="请输入您想要溯源的文本或问题..."></textarea>
+                                </div>
+                                
+                                <div class="flex flex-col space-y-3 pt-6">
+                                    <button id="search-button" class="bg-primary hover:bg-primary/90 text-white px-6 py-3 rounded-lg font-medium flex items-center justify-center transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg" disabled="">
+                                        <i class="fa fa-search"></i>
+                                    </button>
+                                    
+                                    <button id="search-clear-button" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-3 rounded-lg font-medium text-sm transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed" disabled="">
+                                        <i class="fa fa-refresh mr-1"></i>清除内容
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 第三列：结果区域 -->
+                        <div class="lg:col-span-5">
+                            <div class="bg-white rounded-2xl shadow-md p-6 md:p-8 h-full card-hover transform transition-all duration-500">
+                                <!-- 初始状态提示 -->
+                                <div id="search-initial-state" class="text-center py-16">
+                                    <div class="w-20 h-20 mx-auto bg-gray-100 rounded-full flex items-center justify-center mb-6">
+                                        <i class="fa fa-search text-gray-300 text-4xl"></i>
+                                    </div>
+                                    <p class="text-gray-500">请在左侧输入内容并点击"开始检索"</p>
+                                </div>
+                                
+                                <!-- 加载状态 -->
+                                <div id="search-loading-indicator" class="hidden text-center py-16">
+                                    <div class="inline-block animate-spin rounded-full h-14 w-14 border-t-2 border-b-2 border-primary mb-6"></div>
+                                    <p class="text-gray-600">正在检索相关材料，请稍候...</p>
+                                    <p class="text-xs text-gray-400 mt-2">这可能需要几秒钟时间</p>
+                                </div>
+
+                                <!-- 结果区域 -->
+                                <div id="search-results-container" class="hidden">
+                                    <div class="flex flex-wrap justify-between items-center mb-6 pb-4 border-b border-gray-100">
+                                        <h3 class="text-xl font-semibold flex items-center text-accent">
+                                            <i class="fa fa-check-circle mr-2"></i>结果
+                                        </h3>
+                                        <div class="text-sm text-gray-500 mt-2 sm:mt-0">
+                                            <span id="search-result-stats">找到 0 条结果</span>
+                                            <span id="search-processing-time" class="ml-4"></span>
+                                        </div>
+                                    </div>
+                                    
+                                    <div id="search-no-results" class="hidden text-center py-16">
+                                        <div class="w-20 h-20 mx-auto bg-gray-100 rounded-full flex items-center justify-center mb-6">
+                                            <i class="fa fa-search-minus text-gray-300 text-4xl"></i>
+                                        </div>
+                                        <p class="text-gray-500">未找到相关材料</p>
+                                        <button id="search-try-again-button" class="mt-4 bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-medium text-sm transition-all duration-300">
+                                            <i class="fa fa-refresh mr-1"></i>尝试大模型增强检索
+                                        </button>
+                                    </div>
+                                    
+                                    <!-- 差异可视化区域（仅在启用校验时显示） -->
+                                    <div id="diff-visualization-container" class="hidden space-y-6">
+                                        <div class="bg-gray-50 rounded-xl p-6 border border-gray-100">
+                                            <h4 class="text-lg font-medium text-gray-800 mb-4 flex items-center">
+                                                <i class="fa fa-exchange text-primary mr-2"></i>文本修正
+                                            </h4>
+                                            <div class="relative">
+                                                <div id="diff-merged-view" class="py-4 px-2 bg-white rounded-lg min-h-[60px] text-lg leading-relaxed"></div>
+                                                <div id="diff-reference-link-container" class="absolute bottom-2 right-2"></div>
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="bg-gray-50 rounded-xl p-6 border border-gray-100">
+                                            <h4 class="text-lg font-medium text-gray-800 mb-4 flex items-center">
+                                                <i class="fa fa-list-alt text-primary mr-2"></i>修正说明
+                                            </h4>
+                                            <div id="diff-explanations" class="space-y-3 pl-2">
+                                                <!-- 修正说明将从后端获取 -->
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- 处理后的内容区域（非校验模式） -->
+                                    <div id="search-processed-content-container" class="space-y-6 max-h-[500px] overflow-y-auto">
+                                        <div class="bg-gray-50 rounded-xl p-6 border border-gray-100">
+                                            <h4 class="text-lg font-medium text-gray-800 mb-4 flex items-center">
+                                                <i class="fa fa-file-text-o text-primary mr-2"></i>回答结果
+                                            </h4>
+                                            <div class="relative">
+                                                <div id="processed-content" class="prose max-w-none"></div>
+                                                <div id="processed-reference-link-container" class="absolute bottom-2 right-2"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- 引用原文展示区域（已改为隐藏，通过模态框显示） -->
+                                    <div id="closest-reference-container" class="hidden space-y-6 mt-6">
+                                        <div class="bg-gray-50 rounded-xl p-6 border border-gray-100">
+                                            <h4 class="text-lg font-medium text-gray-800 mb-4 flex items-center">
+                                                <i class="fa fa-link text-primary mr-2"></i>引用原文
+                                            </h4>
+                                            <div id="closest-reference-content" class="space-y-4 max-h-[300px] overflow-y-auto pr-2">
+                                                <!-- 引用原文内容将在这里动态生成 -->
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 错误信息 -->
+                                <div id="search-error-message" class="hidden py-16">
+                                    <div class="flex items-start">
+                                        <div class="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center mr-4 mt-1">
+                                            <i class="fa fa-exclamation-circle text-red-500 text-xl"></i>
+                                        </div>
+                                        <div>
+                                            <h3 class="font-medium text-red-800 text-lg">检索失败</h3>
+                                            <div class="mt-2 text-sm text-red-700" id="search-error-details"></div>
+                                            <button id="search-retry-button" class="mt-4 bg-red-50 hover:bg-red-100 text-red-700 px-4 py-2 rounded-lg font-medium text-sm transition-all duration-300">
+                                                <i class="fa fa-refresh mr-1"></i>重试
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+
+            <!-- 页脚 -->
+            <footer class="bg-neutral text-white/80 py-8 mt-12">
+                <div class="container mx-auto px-4">
+                    <div class="flex flex-col md:flex-row justify-center items-center">
+                        <div class="mb-4 md:mb-0 text-center">
+                            <p class="text-sm">文本溯源系统 © 北京大学王选计算机研究所2025</p>
+                        </div>
+                    </div>
+                </div>
+            </footer>
+        </div>
+
+        <!-- 中间结果页 -->
+        <div id="entries-page" class="page-transition absolute inset-0 w-full opacity-0 pointer-events-none">
+            <!-- 顶部导航 -->
+            <header class="bg-white/80 backdrop-blur-md shadow-sm sticky top-0 z-30">
+                <div class="container mx-auto px-4 py-4 flex justify-between items-center">
+                    <div class="flex items-center space-x-3">
+                        <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-primary to-llm flex items-center justify-center shadow-md">
+                            <i class="fa fa-search text-white text-xl"></i>
+                        </div>
+                        <h1 class="text-xl md:text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-llm">文本溯源系统</h1>
+                    </div>
+                    <button id="back-to-result-btn" class="flex items-center text-sm text-primary hover:text-primary/80 transition-colors">
+                        <i class="fa fa-arrow-left mr-1"></i>返回结果
+                    </button>
+                </div>
+            </header>
+
+            <!-- 中间结果子页面水平导航 -->
+            <div id="entries-subnav" class="sticky top-16 z-20 bg-white border-b border-gray-200 shadow-sm">
+                <div class="container mx-auto px-4">
+                    <div class="flex flex-wrap items-center gap-2 py-3 overflow-x-auto hide-scrollbar">
+                        <button data-entries-page="generation-info" class="entries-subnav-btn px-4 py-2 rounded-lg text-sm font-medium bg-white text-primary transition-all duration-300 hover:bg-gray-50 whitespace-nowrap">
+                            <i class="fa fa-lightbulb-o mr-1.5"></i>增强材料生成
+                        </button>
+                        <button data-entries-page="search-entries" class="entries-subnav-btn px-4 py-2 rounded-lg text-sm font-medium bg-white text-primary transition-all duration-300 hover:bg-gray-50 whitespace-nowrap">
+                            <i class="fa fa-file-text-o mr-1.5"></i>相关词条
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 主要内容区 -->
+            <main class="container mx-auto px-4 py-8 md:py-10">
+                <div class="max-w-4xl mx-auto">
+                    <div class="bg-white rounded-2xl shadow-md p-6 md:p-8 card-hover">
+                        <!-- 中间结果内容区域 -->
+                        <div id="entries-content" class="space-y-6 min-h-[calc(100vh-320px)]">
+                            <!-- 子页面容器 -->
+                            <div id="generation-info-page" class="entries-subpage hidden"></div>
+                            <div id="search-entries-page" class="entries-subpage hidden"></div>
+                            
+                            <!-- 初始提示 -->
+                            <div id="entries-default-content" class="text-center py-16">
+                                <div class="w-20 h-20 mx-auto bg-gray-100 rounded-full flex items-center justify-center mb-6">
+                                    <i class="fa fa-list-ul text-gray-300 text-4xl"></i>
+                                </div>
+                                <p class="text-gray-500">请从上方选择要查看的处理步骤</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+
+            <!-- 页脚 -->
+            <footer class="bg-neutral text-white/80 py-8 mt-12">
+                <div class="container mx-auto px-4">
+                    <div class="flex flex-col md:flex-row justify-center items-center">
+                        <div class="mb-4 md:mb-0 text-center">
+                            <p class="text-sm">文本溯源系统 © 北京大学王选计算机研究所2025</p>
+                        </div>
+                    </div>
+                </div>
+            </footer>
+        </div>
+    </div>
+
+    <script>
+        // 存储检索结果数据
+        let searchResultsData = null;
+        // 存储当前检索类型 ('speech' 或 'encyclopedia')
+        let currentSearchType = 'speech';
+        // 存储API地址
+        const apiUrls = {
+            speech: 'http://222.29.51.246:8085/search_references',
+            encyclopedia: 'http://222.29.51.246:8081/search_references'
+        };
+        
+        // 页面元素
+        const searchPage = document.getElementById('search-page');
+        const entriesPage = document.getElementById('entries-page');
+        const pageButtons = {
+            search: document.getElementById('search-page-btn'),
+            entries: document.getElementById('entries-page-btn')
+        };
+        const backToResultBtn = document.getElementById('back-to-result-btn');
+        
+        // 检索类型选择器
+        const searchTypeRadios = document.querySelectorAll('input[name="search-type"]');
+        const timeRangeContainer = document.getElementById('time-range-container');
+        
+        // 中间结果子页面元素
+        const entriesSubnav = document.getElementById('entries-subnav');
+        const entriesSubnavBtns = document.querySelectorAll('.entries-subnav-btn');
+        const entriesSubpages = document.querySelectorAll('.entries-subpage');
+        const entriesDefaultContent = document.getElementById('entries-default-content');
+        
+        // 文本差异可视化相关元素
+        const diffVisualizationContainer = document.getElementById('diff-visualization-container');
+        const diffMergedView = document.getElementById('diff-merged-view');
+        const diffExplanations = document.getElementById('diff-explanations');
+        const processedContentContainer = document.getElementById('search-processed-content-container');
+        
+        // 引用原文展示元素
+        const closestReferenceContainer = document.getElementById('closest-reference-container');
+        const closestReferenceContent = document.getElementById('closest-reference-content');
+        const referenceModal = document.getElementById('reference-modal');
+        const referenceModalContent = document.getElementById('reference-modal-content');
+        const closeReferenceModal = document.getElementById('close-reference-modal');
+        const closeReferenceBtn = document.getElementById('close-reference-btn');
+        const diffReferenceLinkContainer = document.getElementById('diff-reference-link-container');
+        const processedReferenceLinkContainer = document.getElementById('processed-reference-link-container');
+        
+        // 初始化可折叠区域
+        function initCollapsibleSections() {
+            const collapsibleHeaders = document.querySelectorAll('.collapsible-header');
+            
+            // 为每个可折叠头部添加点击事件
+            collapsibleHeaders.forEach(header => {
+                header.addEventListener('click', () => {
+                    // 切换父容器的类以控制展开/折叠状态
+                    const parent = header.parentElement;
+                    parent.classList.toggle('collapsible-open');
+                    
+                    // 如果有其他已展开的同类型容器，关闭它们
+                    collapsibleHeaders.forEach(otherHeader => {
+                        if (otherHeader !== header && otherHeader.parentElement.classList.contains('collapsible-open')) {
+                            otherHeader.parentElement.classList.remove('collapsible-open');
+                        }
+                    });
+                });
+            });
+            
+            // 默认展开第一个可折叠区域
+            if (collapsibleHeaders.length > 0) {
+                collapsibleHeaders[0].click();
+            }
+        }
+        
+        // 初始化模态框
+        function initModal() {
+            // 关闭模态框的函数
+            function hideModal() {
+                referenceModal.classList.remove('active');
+                document.body.classList.remove('overflow-hidden');
+            }
+            
+            // 显示模态框的函数
+            function showModal() {
+                referenceModal.classList.add('active');
+                document.body.classList.add('overflow-hidden');
+            }
+            
+            // 绑定关闭事件
+            closeReferenceModal.addEventListener('click', hideModal);
+            closeReferenceBtn.addEventListener('click', hideModal);
+            
+            // 点击背景关闭
+            referenceModal.addEventListener('click', (e) => {
+                if (e.target === referenceModal) {
+                    hideModal();
+                }
+            });
+            
+            // ESC键关闭
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && referenceModal.classList.contains('active')) {
+                    hideModal();
+                }
+            });
+            
+            // 暴露显示模态框的方法
+            window.showReferenceModal = showModal;
+        }
+        
+        // 页面切换函数
+        function showPage(pageId) {
+            // 隐藏所有页面
+            [searchPage, entriesPage].forEach(page => {
+                page.classList.add('opacity-0', 'pointer-events-none');
+            });
+            
+            // 重置所有按钮样式
+            Object.values(pageButtons).forEach(btn => {
+                btn.classList.remove('bg-primary', 'text-white');
+                btn.classList.add('bg-white', 'text-primary', 'opacity-70');
+            });
+            
+            // 显示/隐藏中间结果子导航
+            entriesSubnav.classList.toggle('hidden', pageId !== 'entries-page');
+            
+            // 显示目标页面并设置按钮样式
+            setTimeout(() => {
+                const targetPage = document.getElementById(pageId);
+                targetPage.classList.remove('opacity-0', 'pointer-events-none');
+                pageButtons[pageId.replace('-page', '')].classList.remove('bg-white', 'text-primary', 'opacity-70');
+                pageButtons[pageId.replace('-page', '')].classList.add('bg-primary', 'text-white');
+                
+                // 如果是中间结果页且有数据，显示第一个子页面
+                if (pageId === 'entries-page' && searchResultsData) {
+                    displayIntermediateResults(searchResultsData);
+                    
+                    // 默认显示第一个可用的子页面
+                    const firstValidBtn = Array.from(entriesSubnavBtns).find(btn => !btn.classList.contains('opacity-50', 'pointer-events-none'));
+                    if (firstValidBtn) firstValidBtn.click();
+                }
+            }, 300);
+        }
+        
+        // 中间结果子页面切换
+        function showEntriesSubpage(pageId) {
+            // 隐藏所有子页面和默认内容
+            entriesSubpages.forEach(page => page.classList.add('hidden'));
+            entriesDefaultContent.classList.add('hidden');
+            
+            // 重置所有子导航按钮样式
+            entriesSubnavBtns.forEach(btn => {
+                btn.classList.remove('bg-primary', 'text-white', 'shadow-md');
+                btn.classList.add('bg-white', 'text-primary', 'hover:bg-gray-50');
+            });
+            
+            // 显示目标子页面并设置按钮样式
+            const targetPage = document.getElementById(`${pageId}-page`);
+            if (targetPage) {
+                targetPage.classList.remove('hidden');
+                
+                // 高亮当前按钮
+                const activeBtn = document.querySelector(`[data-entries-page="${pageId}"]`);
+                if (activeBtn) {
+                    activeBtn.classList.remove('bg-white', 'text-primary', 'hover:bg-gray-50');
+                    activeBtn.classList.add('bg-primary', 'text-white', 'shadow-md');
+                }
+            } else {
+                entriesDefaultContent.classList.remove('hidden');
+            }
+        }
+        
+        // 日期时间转换为10位时间戳
+        function convertToTimestamp(dateString) {
+            if (!dateString) return null;
+            return Math.floor(new Date(dateString).getTime() / 1000);
+        }
+        
+        // 文本差异计算和可视化相关函数
+        function getEditOperations(s, t) {
+            const m = s.length, n = t.length;
+            const d = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+            
+            // 初始化矩阵
+            for (let i = 0; i <= m; i++) d[i][0] = i;
+            for (let j = 0; j <= n; j++) d[0][j] = j;
+            
+            // 填充矩阵
+            for (let i = 1; i <= m; i++) {
+                for (let j = 1; j <= n; j++) {
+                    const cost = s[i - 1] === t[j - 1] ? 0 : 1;
+                    d[i][j] = Math.min(
+                        d[i - 1][j] + 1,        // 删除
+                        d[i][j - 1] + 1,        // 插入
+                        d[i - 1][j - 1] + cost  // 替换或匹配
+                    );
+                }
+            }
+            
+            // 回溯找到编辑操作
+            const operations = [];
+            let i = m, j = n;
+            
+            while (i > 0 || j > 0) {
+                if (i > 0 && j > 0 && s[i - 1] === t[j - 1]) {
+                    operations.unshift({ 
+                        type: 'match', 
+                        char: s[i - 1],
+                        originalPos: i - 1,
+                        targetPos: j - 1
+                    });
+                    i--; j--;
+                } else {
+                    const current = d[i][j];
+                    if (i > 0 && d[i - 1][j] + 1 === current) {
+                        operations.unshift({ 
+                            type: 'delete', 
+                            char: s[i - 1],
+                            originalPos: i - 1
+                        });
+                        i--;
+                    } else if (j > 0 && d[i][j - 1] + 1 === current) {
+                        operations.unshift({ 
+                            type: 'insert', 
+                            char: t[j - 1],
+                            targetPos: j - 1
+                        });
+                        j--;
+                    } else {
+                        operations.unshift({ 
+                            type: 'replace', 
+                            oldChar: s[i - 1], 
+                            newChar: t[j - 1],
+                            originalPos: i - 1,
+                            targetPos: j - 1
+                        });
+                        i--; j--;
+                    }
+                }
+            }
+            
+            return operations;
+        }
+
+        // 合并相邻操作并生成说明
+        function mergeOperations(operations) {
+            if (!operations.length) return { mergedOps: [], explanations: [] };
+            
+            const mergedOps = [];
+            const explanations = [];
+            let currentGroup = null;
+            let step = 1;
+            
+            operations.forEach(op => {
+                if (currentGroup) {
+                    // 合并相同类型的相邻操作
+                    if ((currentGroup.type === 'delete-group' && op.type === 'delete') ||
+                        (currentGroup.type === 'insert-group' && op.type === 'insert') ||
+                        (currentGroup.type === 'replace-group' && op.type === 'replace')) {
+                        
+                        if (op.type === 'delete') {
+                            currentGroup.chars += op.char;
+                            currentGroup.endPos = op.originalPos;
+                        } else if (op.type === 'insert') {
+                            currentGroup.chars += op.char;
+                            currentGroup.endPos = op.targetPos;
+                        } else if (op.type === 'replace') {
+                            currentGroup.oldChars += op.oldChar;
+                            currentGroup.newChars += op.newChar;
+                            currentGroup.endOriginalPos = op.originalPos;
+                            currentGroup.endTargetPos = op.targetPos;
+                        }
+                        return;
+                    }
+                    
+                    // 合并删除和替换
+                    if ((currentGroup.type === 'delete-group' && op.type === 'replace')) {
+                        currentGroup.type = 'replace-group';
+                        currentGroup.oldChars = currentGroup.chars + op.oldChar;
+                        currentGroup.newChars = op.newChar;
+                        currentGroup.startOriginalPos = currentGroup.startPos;
+                        currentGroup.endOriginalPos = op.originalPos;
+                        currentGroup.startTargetPos = op.targetPos;
+                        currentGroup.endTargetPos = op.targetPos;
+                        delete currentGroup.chars;
+                        delete currentGroup.startPos;
+                        delete currentGroup.endPos;
+                        return;
+                    }
+                    
+                    if ((currentGroup.type === 'replace-group' && op.type === 'delete')) {
+                        currentGroup.oldChars += op.char;
+                        currentGroup.endOriginalPos = op.originalPos;
+                        return;
+                    }
+                    
+                    // 不能合并则添加当前组并生成说明
+                    addExplanation(currentGroup, step++);
+                    mergedOps.push(currentGroup);
+                    currentGroup = null;
+                }
+                
+                // 创建新组
+                if (op.type === 'delete') {
+                    currentGroup = { 
+                        type: 'delete-group', 
+                        chars: op.char,
+                        startPos: op.originalPos,
+                        endPos: op.originalPos
+                    };
+                } else if (op.type === 'insert') {
+                    currentGroup = { 
+                        type: 'insert-group', 
+                        chars: op.char,
+                        startPos: op.targetPos,
+                        endPos: op.targetPos
+                    };
+                } else if (op.type === 'replace') {
+                    currentGroup = { 
+                        type: 'replace-group', 
+                        oldChars: op.oldChar, 
+                        newChars: op.newChar,
+                        startOriginalPos: op.originalPos,
+                        endOriginalPos: op.originalPos,
+                        startTargetPos: op.targetPos,
+                        endTargetPos: op.targetPos
+                    };
+                } else {
+                    mergedOps.push(op);
+                }
+            });
+            
+            // 添加最后一个组并生成说明
+            if (currentGroup) {
+                addExplanation(currentGroup, step++);
+                mergedOps.push(currentGroup);
+            }
+            
+            // 辅助函数：为合并组添加说明
+            function addExplanation(group, step) {
+                let explanation = '';
+                switch(group.type) {
+                    case 'delete-group':
+                        explanation = `删除了"${group.chars}"`;
+                        break;
+                    case 'insert-group':
+                        explanation = `新增了"${group.chars}"`;
+                        break;
+                    case 'replace-group':
+                        explanation = `将"${group.oldChars}"替换为"${group.newChars}"`;
+                        break;
+                }
+                
+                explanations.push({
+                    step: step,
+                    type: group.type,
+                    text: explanation
+                });
+            }
+            
+            return { mergedOps, explanations };
+        }
+
+        // 生成合并视图HTML
+        function generateMergedView(operations) {
+            const { mergedOps, explanations } = mergeOperations(operations);
+            let html = '';
+            
+            mergedOps.forEach(op => {
+                switch (op.type) {
+                    case 'match': html += op.char; break;
+                    case 'delete-group': html += `<span class="diff-delete">${op.chars}</span>`; break;
+                    case 'insert-group': html += `<span class="diff-insert">${op.chars}</span>`; break;
+                    case 'replace-group': html += `<span class="diff-replace-old">${op.oldChars}</span><span class="diff-replace-new">${op.newChars}</span>`; break;
+                }
+            });
+            
+            return { html, explanations };
+        }
+
+        // 生成修正说明HTML（使用后端返回的说明）
+        function generateExplanationsHtml(explanationText) {
+            if (!explanationText || explanationText.trim() === '') {
+                return '<p class="text-gray-500 italic">没有修正说明。</p>';
+            }
+            
+            // 处理多行说明
+            const lines = explanationText.trim().split('\n');
+            if (lines.length === 1) {
+                return `<p>${lines[0]}</p>`;
+            }
+            
+            let html = '<ol class="list-decimal space-y-4 pl-5">';
+            lines.forEach(line => {
+                if (line.trim() === '') return;
+                
+                let icon = '<i class="fa fa-info-circle text-primary mr-2"></i>';
+                
+                // 尝试根据内容判断类型
+                if (line.includes('——>')) {
+                    icon = '<i class="fa fa-exchange text-replace mr-2"></i>';
+                } else if (line.includes('删除')) {
+                    icon = '<i class="fa fa-times-circle text-delete mr-2"></i>';
+                } else if (line.includes('新增')) {
+                    icon = '<i class="fa fa-plus-circle text-insert mr-2"></i>';
+                }
+                
+                html += `<li class="flex items-start">${icon}${line}</li>`;
+            });
+            html += '</ol>';
+            return html;
+        }
+        
+        // 生成引用原文HTML（只保留标题和词条内容）
+        function generateClosestReferenceHtml(reference) {
+            if (!reference || (!reference.content && !reference.doctitle)) {
+                return '<p class="text-gray-500 italic">没有找到引用原文</p>';
+            }
+            
+            return `
+                <div class="border border-gray-200 rounded-lg overflow-hidden">
+                    ${reference.doctitle ? `
+                        <div class="px-3 py-2 bg-gray-50 border-b border-gray-100 text-sm font-medium">
+                            <strong>${reference.doctitle}</strong>
+                        </div>
+                    ` : ''}
+                    <div class="p-3 text-sm whitespace-pre-line">${reference.content || '无内容'}</div>
+                </div>
+            `;
+        }
+        
+        // 创建引用原文链接
+        function createReferenceLink(reference) {
+            if (!reference || (!reference.content && !reference.doctitle)) {
+                return '';
+            }
+            
+            // 存储引用内容到模态框
+            referenceModalContent.innerHTML = generateClosestReferenceHtml(reference);
+            
+            // 创建链接元素
+            return `
+                <button onclick="window.showReferenceModal()" 
+                    class="text-primary hover:text-primary/80 text-sm font-medium flex items-center transition-colors">
+                    <i class="fa fa-link mr-1"></i>引用原文
+                </button>
+            `;
+        }
+        
+        // 初始化检索功能
+        function setupSearchHandlers() {
+            const searchButton = document.getElementById('search-button');
+            const clearButton = document.getElementById('search-clear-button');
+            const tryAgainButton = document.getElementById('search-try-again-button');
+            const retryButton = document.getElementById('search-retry-button');
+            const useLlmEnhancement = document.getElementById('search-use-llm-enhancement');
+            const initialState = document.getElementById('search-initial-state');
+            const loadingIndicator = document.getElementById('search-loading-indicator');
+            const resultsContainer = document.getElementById('search-results-container');
+            const processedContent = document.getElementById('processed-content');
+            const noResults = document.getElementById('search-no-results');
+            const resultStats = document.getElementById('search-result-stats');
+            const processingTime = document.getElementById('search-processing-time');
+            const errorMessage = document.getElementById('search-error-message');
+            const errorDetails = document.getElementById('search-error-details');
+            const systemStatus = document.getElementById('search-system-status');
+            const searchInput = document.getElementById('search-input');
+            const functionTypeRadios = document.querySelectorAll('input[name="search-function-type"]');
+            
+            // 时间选择器元素
+            const startTimeInput = document.getElementById('search-start-time');
+            const endTimeInput = document.getElementById('search-end-time');
+            
+            // 根据检索类型显示/隐藏时间选择器
+            function updateTimeRangeVisibility() {
+                const selectedType = getSelectedSearchType();
+                if (selectedType === 'speech') {
+                    timeRangeContainer.classList.remove('hidden');
+                    // 展开时间范围选择器（如果之前没有展开）
+                    if (!timeRangeContainer.classList.contains('collapsible-open')) {
+                        timeRangeContainer.querySelector('.collapsible-header').click();
+                    }
+                } else {
+                    timeRangeContainer.classList.add('hidden');
+                }
+            }
+            
+            // 绑定检索类型变化事件
+            searchTypeRadios.forEach(radio => {
+                radio.addEventListener('change', updateTimeRangeVisibility);
+            });
+            
+            // 检查输入是否为空
+            function checkInput() {
+                const hasText = searchInput.value.trim() !== '';
+                const hasContent = hasText;
+                
+                searchButton.disabled = !hasContent;
+                clearButton.disabled = !hasContent;
+                searchButton.classList.toggle('opacity-70', searchButton.disabled);
+            }
+            
+            // 绑定输入事件
+            searchInput.addEventListener('input', checkInput);
+            
+            // 清除所有内容
+            clearButton.addEventListener('click', () => {
+                const inputContainer = searchInput.parentElement;
+                inputContainer.classList.add('opacity-50');
+                
+                setTimeout(() => {
+                    searchInput.value = '';
+                    document.getElementById('search-verify-mode').checked = true;
+                    document.getElementById('search-type-speech').checked = true;
+                    startTimeInput.value = '';
+                    endTimeInput.value = '';
+                    
+                    checkInput();
+                    updateTimeRangeVisibility();
+                    
+                    // 重置右侧区域
+                    [loadingIndicator, resultsContainer, errorMessage].forEach(hideSection);
+                    showSection(initialState);
+                    
+                    // 重置数据
+                    searchResultsData = null;
+                    pageButtons.entries.classList.add('pointer-events-none');
+                    inputContainer.classList.remove('opacity-50');
+                }, 200);
+            });
+            
+            // 显示/隐藏区域
+            function showSection(section) {
+                section.classList.remove('hidden');
+                section.classList.add('animate-fadeIn');
+                setTimeout(() => section.classList.remove('animate-fadeIn'), 300);
+            }
+            
+            function hideSection(section) {
+                section.classList.add('hidden');
+            }
+            
+            // 获取选中的检索类型
+            function getSelectedSearchType() {
+                for (const radio of searchTypeRadios) {
+                    if (radio.checked) return radio.value;
+                }
+                return 'speech';
+            }
+            
+            // 获取选中的功能类型
+            function getSelectedFunctionType() {
+                for (const radio of functionTypeRadios) {
+                    if (radio.checked) return radio.value;
+                }
+                return 'verify'; // 默认是校验模式
+            }
+            
+            // 执行搜索
+            async function performSearch() {
+                const searchText = searchInput.value.trim();
+                if (!searchText) return;
+                
+                // 更新当前检索类型
+                currentSearchType = getSelectedSearchType();
+                const searchTypeName = currentSearchType === 'speech' ? '重要讲话' : '知识百科';
+                
+                const useLlm = useLlmEnhancement.checked;
+                const functionType = getSelectedFunctionType();
+                const modeText = functionType === 'verify' ? '知识校验' : '智能问答';
+                
+                // 处理时间范围（仅适用于文本溯源）
+                let startTimeValue = null, endTimeValue = null;
+                if (currentSearchType === 'speech') {
+                    startTimeValue = convertToTimestamp(startTimeInput.value);
+                    endTimeValue = convertToTimestamp(endTimeInput.value);
+                }
+                
+                // 显示加载状态
+                [initialState, resultsContainer, errorMessage].forEach(hideSection);
+                showSection(loadingIndicator);
+                systemStatus.textContent = `${modeText}下进行${searchTypeName}检索${useLlm ? '（大模型增强）' : ''}...`;
+                
+                try {
+                    // 注意：这里使用了performance.now()而不是Date.now()来避免变量名冲突
+                    const requestStartTime = performance.now();
+                    const requestData = {
+                        text_to_search: searchText,
+                        use_llm_enhancement: useLlm,
+                        function_type: functionType
+                    };
+                    
+                    // 对于文本溯源，添加时间范围参数
+                    if (currentSearchType === 'speech') {
+                        if (startTimeValue) requestData.start_time = startTimeValue;
+                        if (endTimeValue) requestData.end_time = endTimeValue;
+                    }
+                    
+                    const response = await fetch(apiUrls[currentSearchType], {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(requestData),
+                        timeout: useLlm ? 60000 : 30000
+                    });
+                    
+                    const result = await response.json();
+                    const requestEndTime = performance.now();
+                    
+                    if (!response.ok) {
+                        throw new Error(result.error || `服务器错误: ${response.status}`);
+                    }
+                    
+                    // 保存结果数据
+                    searchResultsData = result;
+                    searchResultsData.function_type = functionType;
+                    searchResultsData.processing_time_seconds = result.processing_time_seconds || (requestEndTime - requestStartTime) / 1000;
+                    searchResultsData.use_llm_enhancement = useLlm;
+                    searchResultsData.api_type = currentSearchType; // 记录当前API类型
+                    searchResultsData.original_text = searchText; // 保存原始输入文本
+                    
+                    // 保存时间范围信息
+                    if (currentSearchType === 'speech') {
+                        searchResultsData.time_range = {
+                            start_time: convertToTimestamp(startTimeInput.value),
+                            end_time: convertToTimestamp(endTimeInput.value)
+                        };
+                    }
+                    
+                    pageButtons.entries.classList.remove('pointer-events-none');
+                    
+                    // 显示结果
+                    displayResults(searchResultsData);
+                    systemStatus.textContent = `${modeText}检索完成`;
+                    setTimeout(() => systemStatus.textContent = "系统正常运行中", 3000);
+                    
+                } catch (error) {
+                    hideSection(loadingIndicator);
+                    errorDetails.textContent = error.message;
+                    showSection(errorMessage);
+                    systemStatus.textContent = `检索失败`;
+                    pageButtons.entries.classList.add('pointer-events-none');
+                }
+            }
+            
+            // 显示结果
+            function displayResults(data) {
+                hideSection(loadingIndicator);
+                
+                resultStats.textContent = `找到 ${data.result_count} 条结果`;
+                processingTime.textContent = `耗时: ${data.processing_time_seconds.toFixed(2)} 秒`;
+                
+                // 检查是否是校验模式，是否需要显示差异可视化
+                const isVerifyMode = data.function_type === 'verify';
+                
+                // 生成引用原文链接
+                const referenceLink = createReferenceLink(data.closest_reference);
+                
+                // 显示处理后的内容或差异可视化（统一两种检索类型的校验展示）
+                if (isVerifyMode && data.processed_content?.trim() && data.original_text?.trim()) {
+                    // 显示差异可视化
+                    diffVisualizationContainer.classList.remove('hidden');
+                    processedContentContainer.classList.add('hidden');
+                    
+                    // 计算差异并生成可视化
+                    const operations = getEditOperations(data.original_text, data.processed_content);
+                    const { html } = generateMergedView(operations);
+                    
+                    diffMergedView.innerHTML = html;
+                    diffReferenceLinkContainer.innerHTML = referenceLink;
+                    
+                    // 使用后端返回的修正说明
+                    const explanationText = data.verify_components?.explanation || '';
+                    diffExplanations.innerHTML = generateExplanationsHtml(explanationText);
+                } else {
+                    // 显示普通处理结果
+                    diffVisualizationContainer.classList.add('hidden');
+                    processedContentContainer.classList.remove('hidden');
+                    
+                    if (data.processed_content?.trim()) {
+                        processedContent.innerHTML = `<div>${data.processed_content.trim().replace(/\n/g, '<br>')}</div>`;
+                    } else if (data.items && data.items.length) {
+                        processedContent.innerHTML = `<div>${data.items[0].content.trim().replace(/\n/g, '<br>')}</div>`;
+                    } else {
+                        processedContent.innerHTML = '<p class="text-gray-500">无检索结果</p>';
+                    }
+                    
+                    processedReferenceLinkContainer.innerHTML = referenceLink;
+                }
+                
+                // 隐藏原来的引用原文展示区域
+                closestReferenceContainer.classList.add('hidden');
+                
+                if (data.result_count === 0 || !data.items || !data.items.length) {
+                    showSection(noResults);
+                } else {
+                    hideSection(noResults);
+                }
+                
+                showSection(resultsContainer);
+            }
+            
+            // 绑定检索相关事件
+            searchButton.addEventListener('click', performSearch);
+            retryButton.addEventListener('click', performSearch);
+            tryAgainButton.addEventListener('click', () => {
+                useLlmEnhancement.checked = true;
+                performSearch();
+            });
+            searchInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter' && !searchButton.disabled) performSearch();
+            });
+            
+            // 监听时间选择器变化，启用/禁用搜索按钮
+            startTimeInput.addEventListener('change', checkInput);
+            endTimeInput.addEventListener('change', checkInput);
+            
+            // 初始化检查
+            checkInput();
+            updateTimeRangeVisibility();
+        }
+        
+        // 显示中间结果（子页面模式）
+        function displayIntermediateResults(data) {
+            // 重置所有子页面
+            entriesSubpages.forEach(page => {
+                page.innerHTML = '';
+                page.classList.add('hidden');
+            });
+            entriesDefaultContent.classList.remove('hidden');
+            
+            // 重置子导航按钮状态
+            entriesSubnavBtns.forEach(btn => {
+                btn.classList.remove('opacity-50', 'pointer-events-none', 'cursor-not-allowed');
+            });
+            
+            // 1. 增强材料生成信息
+            if (data.intermediate_results?.generation_info && data.use_llm_enhancement) {
+                const genData = data.intermediate_results.generation_info;
+                let genDetails = `
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                        <div class="bg-gray-50 p-3 rounded-lg">
+                            <div class="text-sm text-gray-500 mb-1">生成总数</div>
+                            <div class="font-medium">${genData.total_generated}</div>
+                        </div>
+                        <div class="bg-gray-50 p-3 rounded-lg">
+                            <div class="text-sm text-gray-500 mb-1">有效生成</div>
+                            <div class="font-medium">${genData.valid_generated}</div>
+                        </div>
+                        <div class="bg-gray-50 p-3 rounded-lg">
+                            <div class="text-sm text-gray-500 mb-1">生成错误</div>
+                            <div class="font-medium ${genData.generation_errors > 0 ? 'text-red-600' : ''}">${genData.generation_errors}</div>
+                        </div>
+                    </div>
+                `;
+                
+                // 显示原始文本
+                if (genData.processed_original_text) {
+                    genDetails += `
+                        <div class="mb-4">
+                            <div class="text-sm font-medium mb-2">原始文本</div>
+                            <div class="bg-gray-50 p-3 rounded-lg text-sm">${genData.processed_original_text}</div>
+                        </div>
+                    `;
+                }
+                
+                // 显示生成的材料
+                if (genData.generated_materials && genData.generated_materials.length) {
+                    genDetails += `
+                        <div>
+                            <div class="text-sm font-medium mb-2">生成的补充材料</div>
+                            <div class="space-y-3">
+                                ${genData.generated_materials.map((material, idx) => `
+                                    <div class="bg-gray-50 p-3 rounded-lg text-sm">
+                                        <div class="text-xs text-gray-500 mb-1">补充材料 #${idx+1}</div>
+                                        ${material}
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                document.getElementById('generation-info-page').innerHTML = `
+                    <div class="bg-purple-50 p-4 rounded-lg mb-6">
+                        <div class="flex items-center">
+                            <span class="w-8 h-8 rounded-full flex items-center justify-center mr-3 bg-purple-500 text-white">
+                                <i class="fa fa-lightbulb-o"></i>
+                            </span>
+                            <h4 class="font-medium text-purple-700">增强材料生成</h4>
+                        </div>
+                    </div>
+                    <div class="prose max-w-none">${genDetails}</div>
+                `;
+            } else {
+                document.querySelector('[data-entries-page="generation-info"]').classList.add('opacity-50', 'pointer-events-none', 'cursor-not-allowed');
+            }
+            
+            // 2. 显示检索到的词条
+            if (data.items && data.items.length) {
+                let entriesHtml = `
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <div class="bg-gray-50 p-3 rounded-lg">
+                            <div class="text-sm text-gray-500 mb-1">总词条数</div>
+                            <div class="font-medium">${data.items.length}</div>
+                        </div>
+                        <div class="bg-gray-50 p-3 rounded-lg">
+                            <div class="text-sm text-gray-500 mb-1">最高分数</div>
+                            <div class="font-medium">${Math.max(...data.items.map(i => i.score)) || 0}</div>
+                        </div>
+                    </div>
+                    
+                    <div class="space-y-4 max-h-[calc(100vh-400px)] overflow-y-auto pr-2">
+                        ${data.items.map((item, idx) => `
+                            <div class="border border-gray-200 rounded-lg overflow-hidden">
+                                <div class="px-3 py-2 bg-gray-50 border-b border-gray-100 flex flex-wrap justify-between items-center gap-2">
+                                    <div class="text-sm font-medium">词条 #${idx+1}</div>
+                                    <div class="text-xs text-gray-500 flex flex-wrap gap-x-4 gap-y-1">
+                                        分数: ${item.score || 0}
+                                        ${item.location ? ` | 位置: ${item.location}` : ''}
+                                        ${data.api_type === 'speech' && item.speechtime ? ` | 讲话时间: ${item.speechtime}` : ''}
+                                        ${data.api_type === 'speech' && item.pubdate ? ` | 发布时间: ${item.pubdate}` : ''}
+                                    </div>
+                                </div>
+                                ${item.doctitle ? `
+                                    <div class="px-3 py-2 bg-gray-50 border-b border-gray-100 text-sm font-medium">
+                                        <strong>${item.doctitle}</strong>
+                                    </div>
+                                ` : ''}
+                                <div class="p-3 text-sm whitespace-pre-line">${item.content || '无内容'}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+                
+                // 如果是讲话API，添加说明
+                if (data.api_type === 'speech') {
+                    entriesHtml += `
+                        <div class="mt-4 p-3 bg-blue-50 rounded-lg text-xs text-blue-700">
+                            <i class="fa fa-info-circle mr-1"></i>
+                            注：讲话时间和发布时间仅在检索讲话的API中提供，其他类型API可能不包含这些信息。
+                        </div>
+                    `;
+                }
+                
+                document.getElementById('search-entries-page').innerHTML = `
+                    <div class="bg-teal-50 p-4 rounded-lg mb-6">
+                        <div class="flex items-center">
+                            <span class="w-8 h-8 rounded-full flex items-center justify-center mr-3 bg-teal-500 text-white">
+                                <i class="fa fa-file-text-o"></i>
+                            </span>
+                            <h4 class="font-medium text-teal-700">检索到的相关词条</h4>
+                        </div>
+                    </div>
+                    <div class="prose max-w-none">${entriesHtml}</div>
+                `;
+            } else {
+                document.querySelector('[data-entries-page="search-entries"]').classList.add('opacity-50', 'pointer-events-none', 'cursor-not-allowed');
+            }
+        }
+        
+        // 绑定页面切换事件
+        pageButtons.search.addEventListener('click', () => showPage('search-page'));
+        pageButtons.entries.addEventListener('click', () => showPage('entries-page'));
+        backToResultBtn.addEventListener('click', () => showPage('search-page'));
+        
+        // 绑定中间结果子页面切换事件
+        entriesSubnavBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const pageId = btn.getAttribute('data-entries-page');
+                showEntriesSubpage(pageId);
+            });
+        });
+        
+        // 添加CSS动画和样式
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+            .animate-fadeIn { animation: fadeIn 0.3s ease-in-out; }
+            .prose { color: #374151; max-width: 65ch; margin: 0 auto; }
+            .prose br { margin-bottom: 0.5rem; display: block; }
+            .entries-subpage { animation: fadeIn 0.3s ease-in-out; }
+            .hide-scrollbar::-webkit-scrollbar { display: none; }
+            .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        `;
+        document.head.appendChild(style);
+        
+        // 初始化
+        function init() {
+            // 初始化可折叠区域
+            initCollapsibleSections();
+            
+            // 初始化模态框
+            initModal();
+            
+            // 设置检索页面的处理函数
+            setupSearchHandlers();
+            
+            // 初始化中间结果按钮状态
+            pageButtons.entries.classList.add('pointer-events-none');
+            
+            // 默认显示检索页面
+            showPage('search-page');
+            
+            // 检查Font Awesome是否加载成功
+            function checkFontAwesome() {
+                const testIcon = document.createElement('i');
+                testIcon.className = 'fa fa-check';
+                testIcon.style.position = 'absolute';
+                testIcon.style.visibility = 'hidden';
+                document.body.appendChild(testIcon);
+                
+                // 检查图标是否有内容（通过宽度判断）
+                const hasIcon = testIcon.offsetWidth > 0;
+                document.body.removeChild(testIcon);
+                
+                if (!hasIcon) {
+                    console.warn('Font Awesome未加载成功，尝试备用CDN');
+                    // 添加备用CDN
+                    const link = document.createElement('link');
+                    link.rel = 'stylesheet';
+                    link.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css';
+                    document.head.appendChild(link);
+                }
+            }
+            
+            // 页面加载后检查图标
+            setTimeout(checkFontAwesome, 1000);
+        }
+        
+        // 页面加载完成后初始化
+        window.addEventListener('load', init);
+    </script>
+
+
+</body></html>
