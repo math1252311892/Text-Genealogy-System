@@ -22,9 +22,11 @@ CORS(app)  # 允许跨域请求，与前端配合
 
 # 检索配置
 SEARCH_API_URL = "http://222.29.51.95:4042/speech_search"
-MAX_WORKERS_GENERATION = 3  # 生成材料的线程数
-GENERATION_COUNT = 3  # 大模型生成材料的次数
-MAX_RESULTS = 15  # 限制返回的最大词条数量
+SIMILARITY_API_URL = "http://222.29.51.95:4042/similarity"  # 新增相似度接口
+MAX_WORKERS_GENERATION = 1  # 生成材料的线程数
+GENERATION_COUNT = 1  # 大模型生成材料的次数
+MAX_RESULTS = 10  # 限制返回的最大词条数量
+MAX_WORKERS_SIMILARITY = 20  # 计算相似度的线程数
 
 # ARK API配置
 ARK_API_KEY = os.getenv("ARK_API_KEY")
@@ -46,6 +48,34 @@ formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 console_handler.setFormatter(formatter)
 logging.getLogger().addHandler(console_handler)
 logger = logging.getLogger(__name__)
+
+# 新增：计算两个文本相似度的函数
+def calculate_similarity(sent1: str, sent2: str) -> float:
+    """调用相似度接口计算两个文本的相似度"""
+    if not sent1 or not sent2:
+        return 0.0
+        
+    try:
+        payload = {
+            "sent1": sent1,
+            "sent2": sent2
+        }
+        response = requests.post(
+            SIMILARITY_API_URL,
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            return float(result.get("score", 0.0))
+        else:
+            logger.error(f"相似度接口请求失败: {response.status_code}, 响应: {response.text}")
+            return 0.0
+    except Exception as e:
+        logger.error(f"计算相似度时发生错误: {str(e)}")
+        return 0.0
 
 # Ark API适配器类
 class ArkApiAdapter:
@@ -148,7 +178,7 @@ def find_most_relevant_content(text_to_search, search_results, function_type):
             system_prompt = """你是一个专业的问答专家，擅长基于所有提供的基准材料回答问题。
             请仔细分析问题和所有提供的基准材料，按以下步骤进行处理：
             1. 基于所有基准材料的综合信息提供两部分回答：
-               a. 简洁回答：根据待查询问题和所有基准材料，总结出最精炼的回答（不超过30个字）
+               a. 简洁回答：根据待查询问题和所有基准材料，总结出最精炼的回答
                b. 详细回答：基于所有基准材料的综合信息，提供完整、详细的回答
                两部分回答用"简洁回答："和"详细回答："作为开头明确区分，且两部分之间必须空一行
             2. 如果没有找到相关的基准材料或基准材料不足以回答问题，请直接返回"无法回答"
@@ -158,9 +188,13 @@ def find_most_relevant_content(text_to_search, search_results, function_type):
             - 绝对不提及任何关于基准材料、信息来源或材料的存在
             - 不要包含任何其他标题、说明或解释性文字"""
         
-        # 精简词条格式，仅保留标题和内容的组合
+        # 增强基准材料格式，包含标题、内容、出处、时间和地点
         references = "\n\n".join([
-            f"{item.get('doctitle', '无标题')}：{item['content']}" 
+            f"标题：{item.get('doctitle', '无标题')}\n"
+            f"内容：{item['content']}\n"
+            f"出处：{item.get('source', '未知')}\n"
+            f"时间：{item.get('pubdate', '未知')}\n"
+            f"地点：{item.get('location', '未知')}"
             for item in search_results
         ])
         
@@ -178,13 +212,12 @@ def find_most_relevant_content(text_to_search, search_results, function_type):
             {references}
             
             请基于上述基准材料进行综合回答，严格按照系统提示中的要求和格式返回结果，不要包含任何额外信息。"""
-        
+        logger.info(prompt)
         relevant_content = llm.generate(prompt, system_prompt)
         logger.info(relevant_content)
         # 简单清洗结果
         relevant_content = relevant_content.strip()
         logger.info(f"内容处理完成，耗时: {round(time.time()-start, 4)}秒")
-        logger.info(relevant_content)
         
         return relevant_content
     except Exception as e:
@@ -243,43 +276,40 @@ def extract_qa_components(llm_response):
             "detailed_answer": llm_response
         }
 
-def find_closest_reference(target_text, references):
-    """让模型找出与目标文本最接近的基准材料，适用于校验和问答模式"""
-    if not llm or not target_text or not references:
+def find_closest_reference(target_text, references, function_type):
+    """根据功能类型，使用相似度接口找出与目标文本最接近的基准材料"""
+    if not target_text or not references:
         return None
         
     try:
         start = time.time()
-        system_prompt = """你是一个专业的文本匹配专家，擅长找出与目标文本最接近的参考材料。
-        请仔细对比目标文本和提供的所有参考材料，找出内容最相似、最相关的那一条。
-        仅返回最匹配的参考材料的完整内容，不要添加任何解释、说明或其他内容。
-        如果没有明显匹配的材料，返回"无匹配材料"。"""
         
-        # 为每个参考材料添加编号，方便模型识别
-        numbered_references = []
-        for i, ref in enumerate(references, 1):
-            ref_content = ref.get('content', '')
-            ref_title = ref.get('doctitle', '无标题')
-            numbered_references.append(f"参考材料{i}：{ref_title} - {ref_content}")
+        # 使用线程池并发计算相似度，提高效率
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS_SIMILARITY) as executor:
+            # 提交所有相似度计算任务
+            futures = {
+                executor.submit(calculate_similarity, target_text, ref.get('content', '')): ref
+                for ref in references
+            }
+            
+            # 收集结果
+            similarity_scores = []
+            for future in as_completed(futures):
+                ref = futures[future]
+                try:
+                    score = future.result()
+                    similarity_scores.append((ref, score))
+                except Exception as e:
+                    logger.error(f"计算单个相似度时出错: {str(e)}")
+                    similarity_scores.append((ref, 0.0))
         
-        references_text = "\n\n".join(numbered_references)
+        # 找到相似度最高的参考材料
+        if similarity_scores:
+            most_similar = max(similarity_scores, key=lambda x: x[1])
+            logger.info(f"{function_type}模式：使用相似度接口找到最匹配材料，相似度: {most_similar[1]:.4f}，耗时: {round(time.time()-start, 4)}秒")
+            return most_similar[0]
         
-        prompt = f"""目标文本：{target_text}
-        
-        参考材料列表：
-        {references_text}
-        
-        请从上述参考材料中找出与目标文本内容最接近、最相关的那一条，仅返回该参考材料的完整内容，不要添加任何其他信息。"""
-        
-        closest_ref = llm.generate(prompt, system_prompt).strip()
-        logger.info(f"找到最接近的参考材料，耗时: {round(time.time()-start, 4)}秒")
-        
-        # 找到匹配的原始参考材料对象
-        for ref in references:
-            if closest_ref in ref.get('content', '') or ref.get('content', '') in closest_ref:
-                return ref
-                
-        return {"content": closest_ref, "doctitle": "匹配结果", "note": "此为模型判断的最接近内容"}
+        return None
         
     except Exception as e:
         logger.error(f"查找最接近的参考材料时出错: {str(e)}")
@@ -424,17 +454,6 @@ def search_references_endpoint():
         
         start_time, end_time = data.get("start_time"), data.get("end_time")
 
-        # 时间参数验证
-        try:
-            if start_time is None:
-                start_time = 0
-            if end_time is None:
-                end_time = 0
-            if start_time > end_time:
-                start_time = end_time = 0
-        except (ValueError, TypeError):
-            start_time = end_time = 0  
-        
         # LLM可用性检查
         if use_llm and not llm:
             logger.warning("LLM不可用，使用基础检索")
@@ -447,7 +466,35 @@ def search_references_endpoint():
 
         # 处理结果
         sorted_items = sorted(items, key=lambda x: x["normalized_score"], reverse=True)
-        deduped = remove_duplicates(sorted_items)[:MAX_RESULTS]
+        deduped = remove_duplicates(sorted_items)
+        
+        # 基于相似度接口计算文本相似度进行重排
+        if deduped:
+            # 使用线程池并发计算每个词条与原始搜索文本的相似度
+            with ThreadPoolExecutor(max_workers=MAX_WORKERS_SIMILARITY) as executor:
+                futures = {
+                    executor.submit(calculate_similarity, text, item.get('content', '')): item
+                    for item in deduped
+                }
+                
+                # 收集结果
+                similarity_scores = []
+                for future in as_completed(futures):
+                    item = futures[future]
+                    try:
+                        score = future.result()
+                        similarity_scores.append((item, score))
+                    except Exception as e:
+                        logger.error(f"计算相似度时出错: {str(e)}")
+                        similarity_scores.append((item, 0.0))
+            
+            # 按相似度降序排序
+            deduped = [item for item, score in sorted(similarity_scores, key=lambda x: x[1], reverse=True)]
+            logger.info(f"基于相似度接口重排完成，共{len(deduped)}条记录")
+        
+        # 截取前MAX_RESULTS个词条
+        deduped = deduped[:MAX_RESULTS]
+        
         processed_content = find_most_relevant_content(text, deduped, func_type)
         combined_content = "\n\n".join([i["content"] for i in deduped if i["content"]])
         
@@ -472,8 +519,8 @@ def search_references_endpoint():
                 # 使用详细回答作为匹配目标
                 target_text = components.get("detailed_answer", processed_content)
             
-            # 为两种类型都查找最接近的基准材料
-            closest_reference = find_closest_reference(target_text, deduped)
+            # 调用修改后的find_closest_reference方法，传入功能类型
+            closest_reference = find_closest_reference(target_text, deduped, func_type)
         
         # 准备返回数据
         response_data = {

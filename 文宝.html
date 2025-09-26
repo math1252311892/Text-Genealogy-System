@@ -1,0 +1,1465 @@
+<html lang="zh-CN"><head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>文宝</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#2563EB',
+                        llm: '#7C3AED',
+                        accent: '#4F46E5',
+                        delete: '#EF4444',
+                        insert: '#10B981',
+                        replace: '#F59E0B'
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .toggle-checkbox:checked { right: 0; border-color: #7C3AED; }
+            .toggle-checkbox:checked + .toggle-label { background-color: #7C3AED; }
+            .collapsible-content { max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; }
+            .collapsible-open .collapsible-content { max-height: 2000px; }
+            .collapsible-icon { transition: transform 0.3s ease; }
+            .collapsible-open .collapsible-icon { transform: rotate(180deg); }
+            .diff-delete { @apply bg-red-100 text-red-800 line-through px-1 rounded; }
+            .diff-insert { @apply bg-green-100 text-green-800 px-1 rounded; }
+            .diff-replace-old { @apply bg-amber-100 text-amber-800 line-through px-1 rounded mr-1; }
+            .diff-replace-new { @apply bg-amber-100 text-amber-800 px-1 rounded ml-1; }
+            .modal-backdrop { @apply fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center opacity-0 pointer-events-none transition-opacity duration-300; }
+            .modal-backdrop.active { @apply opacity-100 pointer-events-auto; }
+            .modal-content { @apply bg-white rounded-xl shadow-xl max-w-3xl w-full max-h-[80vh] transform transition-all duration-300 scale-95 opacity-0; }
+            .modal-backdrop.active .modal-content { @apply scale-100 opacity-100; }
+        }
+    </style>
+    
+    <style>
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .animate-fadeIn { animation: fadeIn 0.3s ease-in-out; }
+        .prose br { margin-bottom: 0.5rem; display: block; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .bg-pattern {
+            background-color: #f8fafc;
+            background-image: 
+                radial-gradient(rgba(37, 99, 235, 0.05) 1px, transparent 1px),
+                radial-gradient(rgba(124, 58, 237, 0.05) 1px, transparent 1px);
+            background-size: 50px 50px;
+            background-position: 0 0, 25px 25px;
+        }
+        .editor-box {
+            border: 1px solid #e2e8f0;
+            border-radius: 0.75rem;
+            transition: all 0.2s ease;
+        }
+        .editor-box:focus-within {
+            border-color: #2563EB;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+        /* 本地富文本编辑器样式 */
+        .local-editor-toolbar {
+            border-bottom: 1px solid #e2e8f0;
+            padding: 8px 12px;
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+            background-color: #f9fafb;
+            border-top-left-radius: 0.75rem;
+            border-top-right-radius: 0.75rem;
+        }
+        .local-editor-button {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            border: 1px solid transparent;
+            background: none;
+            cursor: pointer;
+            color: #4b5563;
+            transition: all 0.15s ease;
+        }
+        .local-editor-button:hover {
+            background-color: #eff6ff;
+            color: #2563eb;
+            border-color: #dbeafe;
+        }
+        .local-editor-button.active {
+            background-color: #dbeafe;
+            color: #2563eb;
+            border-color: #bfdbfe;
+        }
+        .local-editor-separator {
+            width: 1px;
+            background-color: #e2e8f0;
+            margin: 0 4px;
+        }
+        .local-editor-content {
+            min-height: 250px;
+            padding: 16px;
+            outline: none;
+            border-bottom-left-radius: 0.75rem;
+            border-bottom-right-radius: 0.75rem;
+            background-color: white;
+        }
+        .local-editor-content p {
+            margin: 0 0 1em 0;
+        }
+        .local-editor-content p:last-child {
+            margin-bottom: 0;
+        }
+        /* 检验模式开关样式 */
+        .verify-mode-toggle {
+            display: flex;
+            align-items: center;
+            margin-left: 8px;
+            padding: 0 8px;
+            height: 32px;
+            font-size: 13px;
+        }
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 34px;
+            height: 18px;
+            margin: 0 6px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 18px;
+        }
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 14px;
+            width: 14px;
+            left: 2px;
+            bottom: 2px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .toggle-slider {
+            background-color: #7C3AED;
+        }
+        input:checked + .toggle-slider:before {
+            transform: translateX(16px);
+        }
+        /* 下拉菜单样式 */
+        .dropdown-container {
+            position: relative;
+            width: 100%;
+        }
+        .dropdown-header {
+            background-gradient-to-r from-blue-50 to-indigo-50;
+            border: 1px solid #dbeafe;
+            border-radius: 0.75rem;
+            padding: 0.75rem;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .dropdown-content {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            margin-top: 0.25rem;
+            background-color: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            z-index: 10;
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+        }
+        .dropdown-open .dropdown-content {
+            max-height: 200px;
+            padding: 0.5rem 0;
+        }
+        .dropdown-item {
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+            transition: background-color 0.15s ease;
+        }
+        .dropdown-item:hover {
+            background-color: #f1f5f9;
+        }
+        .dropdown-item input {
+            margin-right: 0.5rem;
+        }
+        /* 选择提示样式 */
+        .selection-info {
+            font-size: 12px;
+            color: #64748b;
+            margin-top: 4px;
+            padding-left: 4px;
+        }
+        /* 引用信息样式 */
+        .reference-metadata {
+            font-size: 12px;
+            color: #64748b;
+            margin-top: 4px;
+            padding-left: 4px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+    </style>
+</head>
+<body class="bg-pattern font-sans text-gray-800 min-h-screen">
+    <!-- 引用原文模态框 -->
+    <div id="reference-modal" class="modal-backdrop">
+        <div class="modal-content">
+            <div class="p-5 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-semibold text-accent">引用原文</h3>
+                <button id="close-reference-modal" class="text-gray-500 hover:text-gray-700">×</button>
+            </div>
+            <div id="reference-modal-content" class="p-5 overflow-y-auto max-h-[calc(80vh-120px)]"></div>
+            <div class="p-4 border-t border-gray-200 flex justify-end">
+                <button id="close-reference-btn" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm transition-colors">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 中间结果模态框 -->
+    <div id="entries-modal" class="modal-backdrop">
+        <div class="modal-content">
+            <div class="p-5 border-b border-gray-200 flex justify-between items-center">
+                <h3 class="text-lg font-semibold text-accent">中间结果</h3>
+                <button id="close-entries-modal" class="text-gray-500 hover:text-gray-700">×</button>
+            </div>
+            
+            <div id="entries-subnav" class="sticky top-0 bg-white border-b border-gray-200 shadow-sm">
+                <div class="container mx-auto px-4">
+                    <div class="flex flex-wrap items-center gap-2 py-3 overflow-x-auto hide-scrollbar">
+                        <button data-entries-page="generation-info" class="px-4 py-2 rounded-lg text-sm font-medium bg-white text-primary hover:bg-gray-50 transition-colors">
+                            增强材料生成
+                        </button>
+                        <button data-entries-page="search-entries" class="px-4 py-2 rounded-lg text-sm font-medium bg-white text-primary hover:bg-gray-50 transition-colors">
+                            相关词条
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="entries-modal-content" class="p-5 overflow-y-auto max-h-[calc(80vh-160px)]">
+                <div id="entries-content">
+                    <div id="generation-info-page" class="hidden"></div>
+                    <div id="search-entries-page" class="hidden"></div>
+                    <div id="entries-default-content" class="text-center py-16">
+                        <div class="w-20 h-20 mx-auto bg-gray-100 rounded-xl flex items-center justify-center mb-6">
+                            <span class="text-gray-300 text-4xl">≡</span>
+                        </div>
+                        <p class="text-gray-500">请从上方选择要查看的处理步骤</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="p-4 border-t border-gray-200 flex justify-end">
+                <button id="close-entries-btn" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg text-sm transition-colors">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 页面容器 -->
+    <div>
+        <!-- 顶部导航 -->
+        <header class="bg-white shadow-sm">
+            <div class="container mx-auto px-4 py-4 flex justify-between items-center">
+                <div class="flex items-center space-x-3">
+                    <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-primary to-llm flex items-center justify-center shadow-md">
+                        <i class="fa fa-book text-white text-xl"></i>
+                    </div>
+                    <h1 class="text-xl md:text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary to-llm">文宝</h1>
+                </div>
+            </div>
+        </header>
+
+        <!-- 主要内容区 - 两列布局 -->
+        <main class="container mx-auto px-4 py-8">
+            <div class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <!-- 左侧列：输入 + 按钮 -->
+                <div class="flex flex-col space-y-6">
+                    <!-- 输入区域（本地富文本编辑器） -->
+                    <div class="bg-white rounded-2xl shadow-md p-5 card-hover">
+                        <div class="mb-3">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">校验文本编辑器</label>
+                            <div class="text-xs text-gray-500 mb-2">可使用鼠标选择部分文本进行校验，未选择时将校验全部文本</div>
+                        </div>
+                        <div class="editor-box">
+                            <!-- 编辑器工具栏 -->
+                            <div class="local-editor-toolbar">
+                                <button class="local-editor-button" data-command="formatBlock" data-value="<h1>" title="标题1">
+                                    <b>H1</b>
+                                </button>
+                                <button class="local-editor-button" data-command="formatBlock" data-value="<h2>" title="标题2">
+                                    <b>H2</b>
+                                </button>
+                                <button class="local-editor-button" data-command="formatBlock" data-value="<p>" title="段落">
+                                    <b>¶</b>
+                                </button>
+                                <div class="local-editor-separator"></div>
+                                <button class="local-editor-button" data-command="bold" title="加粗">
+                                    <b>B</b>
+                                </button>
+                                <button class="local-editor-button" data-command="italic" title="斜体">
+                                    <i>I</i>
+                                </button>
+                                <button class="local-editor-button" data-command="underline" title="下划线">
+                                    <u>U</u>
+                                </button>
+                                <div class="local-editor-separator"></div>
+                                <button class="local-editor-button" data-command="insertUnorderedList" title="无序列表">
+                                    <i class="fa fa-list-ul"></i>
+                                </button>
+                                <button class="local-editor-button" data-command="insertOrderedList" title="有序列表">
+                                    <i class="fa fa-list-ol"></i>
+                                </button>
+                                <div class="local-editor-separator"></div>
+                                <button class="local-editor-button" data-command="justifyLeft" title="左对齐">
+                                    <i class="fa fa-align-left"></i>
+                                </button>
+                                <button class="local-editor-button" data-command="justifyCenter" title="居中对齐">
+                                    <i class="fa fa-align-center"></i>
+                                </button>
+                                <button class="local-editor-button" data-command="justifyRight" title="右对齐">
+                                    <i class="fa fa-align-right"></i>
+                                </button>
+                                <div class="local-editor-separator"></div>
+                                <button class="local-editor-button" data-command="undo" title="撤销">
+                                    <i class="fa fa-undo"></i>
+                                </button>
+                                <button class="local-editor-button" data-command="redo" title="重做">
+                                    <i class="fa fa-repeat"></i>
+                                </button>
+                            </div>
+                            <!-- 编辑器内容区 -->
+                            <div id="local-rich-text-editor" class="local-editor-content" contenteditable="true">
+                                <p>请输入您想要校验的文本...</p>
+                            </div>
+                            <!-- 选择信息提示 -->
+                            <div id="selection-info" class="selection-info hidden">已选择 <span id="selection-length">0</span> 个字符</div>
+                        </div>
+                    </div>
+                    
+                    <!-- 新增问答输入框 -->
+                    <div class="bg-white rounded-2xl shadow-md p-5 card-hover">
+                        <div class="mb-3">
+                            <label for="question-input" class="block text-sm font-medium text-gray-700 mb-1">问答输入框</label>
+                            <div class="text-xs text-gray-500 mb-2">在问答模式下，将使用此文本进行检索</div>
+                        </div>
+                        <textarea 
+                            id="question-input" 
+                            class="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-primary/50 focus:border-primary text-sm min-h-[100px]"
+                            placeholder="请输入您的问题..."
+                        ></textarea>
+                    </div>
+                    
+                    <!-- 检索按钮 -->
+                    <div class="flex">
+                        <button id="search-button" class="bg-primary hover:bg-primary/90 text-white px-6 py-3 rounded-lg font-medium flex items-center justify-center transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-md w-full" disabled>
+                            <i class="fa fa-search mr-2"></i>开始检索
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- 右侧列：结果区域 + 功能选择 -->
+                <div class="flex flex-col space-y-6">
+                    <!-- 结果区域 -->
+                    <div class="bg-white rounded-2xl shadow-md p-5 h-full card-hover">
+                        <!-- 初始状态 -->
+                        <div id="search-initial-state" class="text-center py-16">
+                            <div class="w-20 h-20 mx-auto bg-gray-100 rounded-xl flex items-center justify-center mb-6">
+                                <span class="text-gray-300 text-4xl">🔍</span>
+                            </div>
+                            <p class="text-gray-500">请在左侧输入内容并点击"开始检索"</p>
+                        </div>
+                        
+                        <!-- 加载状态 -->
+                        <div id="search-loading-indicator" class="hidden text-center py-16">
+                            <div class="inline-block animate-spin rounded-full h-14 w-14 border-t-2 border-b-2 border-primary mb-6"></div>
+                            <p class="text-gray-600">正在检索相关材料，请稍候...</p>
+                        </div>
+
+                        <!-- 结果区域 -->
+                        <div id="search-results-container" class="hidden">
+                            <div class="flex flex-wrap justify-between items-center mb-6 pb-4 border-b border-gray-100">
+                                <h3 class="text-xl font-semibold text-accent">结果</h3>
+                                <div class="text-sm text-gray-500 mt-2 sm:mt-0">
+                                    <span id="search-result-stats">找到 0 条结果</span>
+                                    <span id="search-processing-time" class="ml-4"></span>
+                                </div>
+                            </div>
+                            
+                            <!-- 无结果状态 -->
+                            <div id="search-no-results" class="hidden text-center py-16">
+                                <div class="w-20 h-20 mx-auto bg-gray-100 rounded-xl flex items-center justify-center mb-6">
+                                    <span class="text-gray-300 text-4xl">✖</span>
+                                </div>
+                                <p class="text-gray-500">未找到相关材料</p>
+                                <button id="search-try-again-button" class="mt-4 bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-medium text-sm transition-colors">
+                                    尝试大模型增强检索
+                                </button>
+                            </div>
+                            
+                            <!-- 差异可视化 -->
+                            <div id="diff-visualization-container" class="hidden space-y-6">
+                                <div class="bg-gray-50 rounded-xl p-4 border border-gray-100">
+                                    <h4 class="text-lg font-medium text-gray-800 mb-4">文本修正</h4>
+                                    <div id="diff-merged-view" class="py-3 px-2 bg-white rounded-lg min-h-[60px] text-base leading-relaxed"></div>
+                                </div>
+                                <!-- 引用原文链接放在框外下方，右对齐 -->
+                                <div id="diff-reference-link-container" class="flex justify-end mt-1 mb-2">
+                                    <button onclick="window.showReferenceModal()" class="text-primary hover:text-primary/80 text-sm font-medium flex items-center transition-colors">
+                                        <i class="fa fa-link mr-1"></i>引用原文
+                                    </button>
+                                </div>
+                                
+                                <div class="bg-gray-50 rounded-xl p-4 border border-gray-100">
+                                    <h4 class="text-lg font-medium text-gray-800 mb-4">修正说明</h4>
+                                    <div id="diff-explanations" class="space-y-3 pl-2"></div>
+                                </div>
+                                <!-- 中间结果链接放在框外下方，右对齐 -->
+                                <div id="show-entries-link" class="flex justify-end mt-1 mb-2 hidden">
+                                    <button class="text-primary hover:text-primary/80 text-sm font-medium flex items-center transition-colors">
+                                        <i class="fa fa-list mr-1"></i>查看中间结果
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <!-- 处理结果 -->
+                            <div id="search-processed-content-container" class="space-y-6 max-h-[calc(100vh-220px)] overflow-y-auto">
+                                <div class="bg-gray-50 rounded-xl p-4 border border-gray-100">
+                                    <h4 class="text-lg font-medium text-gray-800 mb-4">回答结果</h4>
+                                    <div id="processed-content"></div>
+                                </div>
+                                <!-- 引用原文链接放在框外下方，右对齐 -->
+                                <div id="processed-reference-link-container" class="flex justify-end mt-1 mb-2">
+                                    <button onclick="window.showReferenceModal()" class="text-primary hover:text-primary/80 text-sm font-medium flex items-center transition-colors">
+                                        <i class="fa fa-link mr-1"></i>引用原文
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 错误信息 -->
+                        <div id="search-error-message" class="hidden py-16">
+                            <div class="flex items-start">
+                                <div class="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center mr-4 mt-1">
+                                    <span class="text-red-500 text-xl">!</span>
+                                </div>
+                                <div>
+                                    <h3 class="font-medium text-red-800 text-lg">检索失败</h3>
+                                    <div class="mt-2 text-sm text-red-700" id="search-error-details"></div>
+                                    <button id="search-retry-button" class="mt-4 bg-red-50 hover:bg-red-100 text-red-700 px-4 py-2 rounded-lg font-medium text-sm transition-colors">
+                                        重试
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 功能选择区域（移至结果下方） -->
+                    <div class="bg-white rounded-2xl shadow-md p-5 card-hover">
+                        <div class="flex flex-wrap gap-4">
+                            <!-- 检索类型 - 下拉式展开 -->
+                            <div class="flex-1 min-w-[200px]">
+                                <div class="dropdown-container" id="knowledge-source-dropdown">
+                                    <div class="dropdown-header">
+                                        <div id="selected-knowledge-source">知识源: 重要讲话</div>
+                                        <span class="text-xs text-gray-500 collapsible-icon">▼</span>
+                                    </div>
+                                    <div class="dropdown-content">
+                                        <div class="dropdown-item">
+                                            <input type="radio" id="search-type-speech" name="search-type" value="speech" class="w-4 h-4 text-primary focus:ring-primary border-gray-300" checked>
+                                            <label for="search-type-speech" class="ml-2 text-sm text-gray-700">重要讲话</label>
+                                        </div>
+                                        <div class="dropdown-item">
+                                            <input type="radio" id="search-type-encyclopedia" name="search-type" value="encyclopedia" class="w-4 h-4 text-accent focus:ring-accent border-gray-300">
+                                            <label for="search-type-encyclopedia" class="ml-2 text-sm text-gray-700">知识百科</label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- 大模型增强 -->
+                            <div class="flex-1 min-w-[200px]">
+                                <div class="bg-gradient-to-r from-purple-50 to-blue-50 p-3 rounded-xl border border-purple-100 h-full">
+                                    <div class="flex items-center justify-between">
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-800">大模型增强检索</label>
+                                        </div>
+                                        <div class="relative inline-block w-12 h-6">
+                                            <input type="checkbox" id="search-use-llm-enhancement" class="toggle-checkbox absolute block w-6 h-6 rounded-full bg-white border-4 appearance-none cursor-pointer transition-all checked:right-0 checked:border-llm" checked>
+                                            <label for="search-use-llm-enhancement" class="toggle-label block overflow-hidden h-6 rounded-full bg-gray-300 cursor-pointer"></label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- 清除内容按钮 -->
+                            <div class="flex items-center min-w-[120px]">
+                                <button id="search-clear-button" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-3 rounded-lg font-medium text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                                    清除内容
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- 模式切换 -->
+                        <div class="mt-4">
+                            <div class="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-100 p-3">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-800">模式选择</label>
+                                        <div class="text-xs text-gray-500 mt-1">校验模式：使用编辑器文本 | 问答模式：使用问答框文本</div>
+                                    </div>
+                                    <div class="verify-mode-toggle">
+                                        问答模式
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" id="search-verify-mode" checked>
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                        校验模式
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- 页脚 -->
+        <footer class="bg-gray-800 text-white/80 py-6 mt-8">
+            <div class="container mx-auto px-4 text-center">
+                <p class="text-sm">文宝 © 北京大学王选计算机研究所2025</p>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        let searchResultsData = null;
+        let currentSearchType = 'speech';
+        let richTextEditor = null; // 富文本编辑器实例
+        const apiUrls = {
+            speech: 'http://222.29.51.246:8085/search_references',
+            encyclopedia: 'http://222.29.51.246:8081/search_references'
+        };
+        
+        // DOM元素引用
+        const elements = {
+            // 模态框相关
+            referenceModal: document.getElementById('reference-modal'),
+            referenceModalContent: document.getElementById('reference-modal-content'),
+            closeReferenceModal: document.getElementById('close-reference-modal'),
+            closeReferenceBtn: document.getElementById('close-reference-btn'),
+            entriesModal: document.getElementById('entries-modal'),
+            closeEntriesModal: document.getElementById('close-entries-modal'),
+            closeEntriesBtn: document.getElementById('close-entries-btn'),
+            showEntriesLink: document.getElementById('show-entries-link'),
+            
+            // 结果展示相关
+            diffVisualizationContainer: document.getElementById('diff-visualization-container'),
+            diffMergedView: document.getElementById('diff-merged-view'),
+            diffExplanations: document.getElementById('diff-explanations'),
+            processedContentContainer: document.getElementById('search-processed-content-container'),
+            diffReferenceLinkContainer: document.getElementById('diff-reference-link-container'),
+            processedReferenceLinkContainer: document.getElementById('processed-reference-link-container'),
+            
+            // 搜索相关
+            searchButton: document.getElementById('search-button'),
+            clearButton: document.getElementById('search-clear-button'),
+            tryAgainButton: document.getElementById('search-try-again-button'),
+            retryButton: document.getElementById('search-retry-button'),
+            useLlmEnhancement: document.getElementById('search-use-llm-enhancement'),
+            verifyModeCheckbox: document.getElementById('search-verify-mode'),
+            initialState: document.getElementById('search-initial-state'),
+            loadingIndicator: document.getElementById('search-loading-indicator'),
+            resultsContainer: document.getElementById('search-results-container'),
+            processedContent: document.getElementById('processed-content'),
+            noResults: document.getElementById('search-no-results'),
+            resultStats: document.getElementById('search-result-stats'),
+            processingTime: document.getElementById('search-processing-time'),
+            errorMessage: document.getElementById('search-error-message'),
+            errorDetails: document.getElementById('search-error-details'),
+            
+            // 中间结果
+            entriesSubnavBtns: document.querySelectorAll('[data-entries-page]'),
+            entriesSubpages: document.querySelectorAll('[id$="-page"]'),
+            entriesDefaultContent: document.getElementById('entries-default-content'),
+            
+            // 本地编辑器和问答框
+            editorElement: document.getElementById('local-rich-text-editor'),
+            questionInput: document.getElementById('question-input'),
+            editorButtons: document.querySelectorAll('.local-editor-button'),
+            selectionInfo: document.getElementById('selection-info'),
+            selectionLength: document.getElementById('selection-length'),
+            
+            // 知识源下拉菜单
+            knowledgeSourceDropdown: document.getElementById('knowledge-source-dropdown'),
+            selectedKnowledgeSource: document.getElementById('selected-knowledge-source'),
+            searchTypeRadios: document.querySelectorAll('input[name="search-type"]')
+        };
+
+        // 获取编辑器中选中的文本
+        function getSelectedText() {
+            if (window.getSelection) {
+                return window.getSelection().toString();
+            } else if (document.selection && document.selection.type !== "Control") {
+                return document.selection.createRange().text;
+            }
+            return '';
+        }
+
+        // 更新选择信息显示
+        function updateSelectionInfo() {
+            const selectedText = getSelectedText();
+            const verifyMode = elements.verifyModeCheckbox.checked;
+            
+            if (verifyMode && selectedText) {
+                elements.selectionLength.textContent = selectedText.length;
+                elements.selectionInfo.classList.remove('hidden');
+            } else {
+                elements.selectionInfo.classList.add('hidden');
+            }
+            
+            checkInputContent();
+        }
+
+        // 初始化本地富文本编辑器
+        function initLocalRichTextEditor() {
+            // 存储编辑器元素引用
+            richTextEditor = elements.editorElement;
+            
+            // 绑定工具栏按钮事件
+            elements.editorButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    const command = this.getAttribute('data-command');
+                    const value = this.getAttribute('data-value') || null;
+                    
+                    // 执行文档命令
+                    document.execCommand(command, false, value);
+                    
+                    // 聚焦到编辑器
+                    richTextEditor.focus();
+                    
+                    // 更新按钮状态
+                    updateEditorButtonStates();
+                });
+            });
+            
+            // 监听编辑器内容变化和选择变化
+            richTextEditor.addEventListener('input', checkInputContent);
+            richTextEditor.addEventListener('mouseup', updateSelectionInfo);
+            richTextEditor.addEventListener('keyup', function() {
+                updateEditorButtonStates();
+                updateSelectionInfo();
+            });
+            richTextEditor.addEventListener('mouseup', updateEditorButtonStates);
+            
+            // 初始化点击编辑器时清空默认文本
+            richTextEditor.addEventListener('click', function() {
+                const defaultText = '请输入您想要校验的文本...';
+                if (this.innerText.trim() === defaultText) {
+                    this.innerHTML = '';
+                }
+            });
+            
+            // 初始化问答框
+            elements.questionInput.addEventListener('input', checkInputContent);
+            
+            // 模式切换时更新选择信息
+            elements.verifyModeCheckbox.addEventListener('change', updateSelectionInfo);
+            
+            // 初始化检查
+            checkInputContent();
+            updateEditorButtonStates();
+        }
+        
+        // 更新编辑器按钮状态（反映当前选中内容的格式）
+        function updateEditorButtonStates() {
+            elements.editorButtons.forEach(button => {
+                const command = button.getAttribute('data-command');
+                
+                // 检查命令状态
+                if (['bold', 'italic', 'underline', 'insertUnorderedList', 'insertOrderedList', 'justifyLeft', 'justifyCenter', 'justifyRight'].includes(command)) {
+                    if (document.queryCommandState(command)) {
+                        button.classList.add('active');
+                    } else {
+                        button.classList.remove('active');
+                    }
+                }
+            });
+        }
+        
+        // 检查输入内容状态
+        function checkInputContent() {
+            if (!richTextEditor) return;
+            
+            const verifyMode = elements.verifyModeCheckbox.checked;
+            const editorDefaultText = '请输入您想要校验的文本...';
+            const questionDefaultText = '请输入您的问题...';
+            
+            // 编辑器内容检查
+            const editorHasContent = richTextEditor.innerText.trim() !== '' && richTextEditor.innerText.trim() !== editorDefaultText;
+            // 选中内容检查
+            const hasSelectedText = getSelectedText().length > 0;
+            // 问答框内容检查
+            const questionHasContent = elements.questionInput.value.trim() !== '' && elements.questionInput.value.trim() !== questionDefaultText;
+            
+            // 根据当前模式判断是否有有效内容
+            const hasValidContent = verifyMode 
+                ? (editorHasContent && (!hasSelectedText || getSelectedText().length > 0)) 
+                : questionHasContent;
+            
+            elements.searchButton.disabled = !hasValidContent;
+            elements.clearButton.disabled = !(editorHasContent || questionHasContent);
+        }
+        
+        // 清除输入内容
+        function clearInputContent() {
+            if (richTextEditor) {
+                richTextEditor.innerHTML = '<p>请输入您想要校验的文本...</p>';
+            }
+            elements.questionInput.value = '';
+            
+            // 清除选择
+            if (window.getSelection) {
+                window.getSelection().removeAllRanges();
+            } else if (document.selection) {
+                document.selection.empty();
+            }
+            
+            checkInputContent();
+            updateEditorButtonStates();
+            updateSelectionInfo();
+        }
+        
+        // 获取当前模式下的文本内容
+        function getCurrentModeTextContent() {
+            const verifyMode = elements.verifyModeCheckbox.checked;
+            
+            if (verifyMode) {
+                // 校验模式 - 优先使用选中的文本，没有则使用全部文本
+                const selectedText = getSelectedText().trim();
+                if (selectedText) {
+                    return selectedText;
+                }
+                
+                // 没有选中内容则使用全部文本
+                if (!richTextEditor) return '';
+                const defaultText = '请输入您想要校验的文本...';
+                const text = richTextEditor.innerText.trim();
+                return text === defaultText ? '' : text;
+            } else {
+                // 问答模式 - 使用问答框内容
+                const defaultText = '请输入您的问题...';
+                const text = elements.questionInput.value.trim();
+                return text === defaultText ? '' : text;
+            }
+        }
+        
+        // 初始化可折叠区域
+        function initCollapsibleSections() {
+            document.querySelectorAll('.collapsible-header').forEach(header => {
+                header.addEventListener('click', () => {
+                    header.parentElement.classList.toggle('collapsible-open');
+                });
+            });
+            // 默认展开第一个可折叠区域
+            document.querySelector('.collapsible-header')?.click();
+        }
+        
+        // 初始化知识源下拉菜单
+        function initKnowledgeSourceDropdown() {
+            const dropdown = elements.knowledgeSourceDropdown;
+            const header = dropdown.querySelector('.dropdown-header');
+            const content = dropdown.querySelector('.dropdown-content');
+            const radioButtons = dropdown.querySelectorAll('input[name="search-type"]');
+            const selectedText = elements.selectedKnowledgeSource;
+            
+            // 点击下拉头部切换展开/收起状态
+            header.addEventListener('click', () => {
+                dropdown.classList.toggle('dropdown-open');
+            });
+            
+            // 点击下拉项选择知识源
+            radioButtons.forEach(radio => {
+                radio.addEventListener('change', function() {
+                    // 更新显示文本
+                    const label = this.nextElementSibling.textContent;
+                    selectedText.textContent = `知识源: ${label}`;
+                    
+                    // 收起下拉菜单
+                    dropdown.classList.remove('dropdown-open');
+                });
+            });
+            
+            // 点击页面其他地方收起下拉菜单
+            document.addEventListener('click', (e) => {
+                if (!dropdown.contains(e.target)) {
+                    dropdown.classList.remove('dropdown-open');
+                }
+            });
+        }
+        
+        // 初始化模态框
+        function initModals() {
+            const hideReferenceModal = () => {
+                elements.referenceModal.classList.remove('active');
+                document.body.classList.remove('overflow-hidden');
+            };
+            
+            const showReferenceModal = () => {
+                elements.referenceModal.classList.add('active');
+                document.body.classList.add('overflow-hidden');
+            };
+            
+            const hideEntriesModal = () => {
+                elements.entriesModal.classList.remove('active');
+                document.body.classList.remove('overflow-hidden');
+            };
+            
+            const showEntriesModal = () => {
+                if (searchResultsData) {
+                    elements.entriesModal.classList.add('active');
+                    document.body.classList.add('overflow-hidden');
+                    displayIntermediateResults(searchResultsData);
+                    // 激活第一个可用标签
+                    const firstValidBtn = Array.from(elements.entriesSubnavBtns).find(
+                        btn => !btn.classList.contains('opacity-50', 'pointer-events-none')
+                    );
+                    firstValidBtn?.click();
+                }
+            };
+            
+            // 绑定模态框事件
+            elements.closeReferenceModal.addEventListener('click', hideReferenceModal);
+            elements.closeReferenceBtn.addEventListener('click', hideReferenceModal);
+            elements.closeEntriesModal.addEventListener('click', hideEntriesModal);
+            elements.closeEntriesBtn.addEventListener('click', hideEntriesModal);
+            elements.referenceModal.addEventListener('click', e => e.target === elements.referenceModal && hideReferenceModal());
+            elements.entriesModal.addEventListener('click', e => e.target === elements.entriesModal && hideEntriesModal());
+            elements.showEntriesLink.addEventListener('click', showEntriesModal);
+            
+            // 键盘事件
+            document.addEventListener('keydown', e => {
+                if (e.key === 'Escape') {
+                    if (elements.referenceModal.classList.contains('active')) hideReferenceModal();
+                    if (elements.entriesModal.classList.contains('active')) hideEntriesModal();
+                }
+            });
+            
+            window.showReferenceModal = showReferenceModal;
+        }
+        
+        // 切换中间结果标签页
+        function initEntriesSubnav() {
+            elements.entriesSubnavBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const pageId = btn.getAttribute('data-entries-page');
+                    // 隐藏所有页面
+                    elements.entriesSubpages.forEach(page => page.classList.add('hidden'));
+                    elements.entriesDefaultContent.classList.add('hidden');
+                    
+                    // 重置按钮样式
+                    elements.entriesSubnavBtns.forEach(b => {
+                        b.classList.remove('bg-primary', 'text-white', 'shadow-md');
+                        b.classList.add('bg-white', 'text-primary', 'hover:bg-gray-50');
+                    });
+                    
+                    // 显示目标页面
+                    const targetPage = document.getElementById(`${pageId}-page`);
+                    if (targetPage) {
+                        targetPage.classList.remove('hidden');
+                        btn.classList.remove('bg-white', 'text-primary', 'hover:bg-gray-50');
+                        btn.classList.add('bg-primary', 'text-white', 'shadow-md');
+                    } else {
+                        elements.entriesDefaultContent.classList.remove('hidden');
+                    }
+                });
+            });
+        }
+        
+        // 文本差异计算
+        function getEditOperations(s, t) {
+            const m = s.length, n = t.length;
+            const d = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+            
+            for (let i = 0; i <= m; i++) d[i][0] = i;
+            for (let j = 0; j <= n; j++) d[0][j] = j;
+            
+            for (let i = 1; i <= m; i++) {
+                for (let j = 1; j <= n; j++) {
+                    const cost = s[i - 1] === t[j - 1] ? 0 : 1;
+                    d[i][j] = Math.min(
+                        d[i - 1][j] + 1,
+                        d[i][j - 1] + 1,
+                        d[i - 1][j - 1] + cost
+                    );
+                }
+            }
+            
+            const operations = [];
+            let i = m, j = n;
+            
+            while (i > 0 || j > 0) {
+                if (i > 0 && j > 0 && s[i - 1] === t[j - 1]) {
+                    operations.unshift({ type: 'match', char: s[i - 1] });
+                    i--; j--;
+                } else {
+                    const current = d[i][j];
+                    if (i > 0 && d[i - 1][j] + 1 === current) {
+                        operations.unshift({ type: 'delete', char: s[i - 1] });
+                        i--;
+                    } else if (j > 0 && d[i][j - 1] + 1 === current) {
+                        operations.unshift({ type: 'insert', char: t[j - 1] });
+                        j--;
+                    } else {
+                        operations.unshift({ type: 'replace', oldChar: s[i - 1], newChar: t[j - 1] });
+                        i--; j--;
+                    }
+                }
+            }
+            
+            return operations;
+        }
+
+        // 合并差异操作 - 重点修改部分：将相邻的新增与替换合并为替换
+        function mergeOperations(operations) {
+            if (!operations.length) return { mergedOps: [], explanations: [] };
+            
+            // 预处理：将相邻的替换和插入合并为替换
+            const preprocessed = [];
+            let i = 0;
+            
+            while (i < operations.length) {
+                // 处理替换后面跟着插入的情况
+                if (operations[i].type === 'replace' && i + 1 < operations.length && operations[i + 1].type === 'insert') {
+                    preprocessed.push({
+                        type: 'replace',
+                        oldChar: operations[i].oldChar,
+                        newChar: operations[i].newChar + operations[i + 1].char
+                    });
+                    i += 2; // 跳过已合并的两个操作
+                } 
+                // 处理插入后面跟着替换的情况
+                else if (operations[i].type === 'insert' && i + 1 < operations.length && operations[i + 1].type === 'replace') {
+                    preprocessed.push({
+                        type: 'replace',
+                        oldChar: operations[i + 1].oldChar,
+                        newChar: operations[i].char + operations[i + 1].newChar
+                    });
+                    i += 2; // 跳过已合并的两个操作
+                } 
+                // 处理插入后面跟着插入的情况（合并为一个插入）
+                else if (operations[i].type === 'insert' && i + 1 < operations.length && operations[i + 1].type === 'insert') {
+                    preprocessed.push({
+                        type: 'insert',
+                        char: operations[i].char + operations[i + 1].char
+                    });
+                    i += 2;
+                } 
+                // 处理替换后面跟着替换的情况（合并为一个替换）
+                else if (operations[i].type === 'replace' && i + 1 < operations.length && operations[i + 1].type === 'replace') {
+                    preprocessed.push({
+                        type: 'replace',
+                        oldChar: operations[i].oldChar + operations[i + 1].oldChar,
+                        newChar: operations[i].newChar + operations[i + 1].newChar
+                    });
+                    i += 2;
+                } 
+                // 其他情况直接添加
+                else {
+                    preprocessed.push(operations[i]);
+                    i++;
+                }
+            }
+            
+            // 进一步合并操作成组
+            const mergedOps = [];
+            const explanations = [];
+            let currentGroup = null;
+            let step = 1;
+            
+            preprocessed.forEach(op => {
+                if (currentGroup) {
+                    // 合并同类操作
+                    if ((currentGroup.type === 'delete-group' && op.type === 'delete') ||
+                        (currentGroup.type === 'insert-group' && op.type === 'insert') ||
+                        (currentGroup.type === 'replace-group' && op.type === 'replace')) {
+                        
+                        if (op.type === 'delete') currentGroup.chars += op.char;
+                        else if (op.type === 'insert') currentGroup.chars += op.char;
+                        else if (op.type === 'replace') {
+                            currentGroup.oldChars += op.oldChar;
+                            currentGroup.newChars += op.newChar;
+                        }
+                        return;
+                    }
+                    
+                    // 处理替换组后面跟着插入组的情况 - 合并为替换
+                    if (currentGroup.type === 'replace-group' && op.type === 'insert') {
+                        currentGroup.newChars += op.char;
+                        return;
+                    }
+                    
+                    // 处理插入组后面跟着替换组的情况 - 合并为替换
+                    if (currentGroup.type === 'insert-group' && op.type === 'replace') {
+                        currentGroup.type = 'replace-group';
+                        currentGroup.oldChars = op.oldChar;
+                        currentGroup.newChars = currentGroup.chars + op.newChar;
+                        delete currentGroup.chars;
+                        return;
+                    }
+                    
+                    // 处理删除组后面跟着插入组的情况 - 转换为替换
+                    if (currentGroup.type === 'delete-group' && op.type === 'insert') {
+                        currentGroup.type = 'replace-group';
+                        currentGroup.oldChars = currentGroup.chars;
+                        currentGroup.newChars = op.char;
+                        delete currentGroup.chars;
+                        return;
+                    }
+                    
+                    // 处理删除组后面跟着替换组的情况 - 合并为替换
+                    if (currentGroup.type === 'delete-group' && op.type === 'replace') {
+                        currentGroup.type = 'replace-group';
+                        currentGroup.oldChars = currentGroup.chars + op.oldChar;
+                        currentGroup.newChars = op.newChar;
+                        delete currentGroup.chars;
+                        return;
+                    }
+                    
+                    // 保存当前组
+                    addExplanation(currentGroup, step++);
+                    mergedOps.push(currentGroup);
+                    currentGroup = null;
+                }
+                
+                // 创建新组
+                if (op.type === 'delete') {
+                    currentGroup = { type: 'delete-group', chars: op.char };
+                } else if (op.type === 'insert') {
+                    currentGroup = { type: 'insert-group', chars: op.char };
+                } else if (op.type === 'replace') {
+                    currentGroup = { type: 'replace-group', oldChars: op.oldChar, newChars: op.newChar };
+                } else {
+                    mergedOps.push(op);
+                }
+            });
+            
+            // 处理最后一组
+            if (currentGroup) {
+                addExplanation(currentGroup, step++);
+                mergedOps.push(currentGroup);
+            }
+            
+            // 添加解释
+            function addExplanation(group, step) {
+                let explanation = '';
+                switch(group.type) {
+                    case 'delete-group': explanation = `删除了"${group.chars}"`; break;
+                    case 'insert-group': explanation = `新增了"${group.chars}"`; break;
+                    case 'replace-group': explanation = `将"${group.oldChars}"替换为"${group.newChars}"`; break;
+                }
+                explanations.push({ step, type: group.type, text: explanation });
+            }
+            
+            return { mergedOps, explanations };
+        }
+
+        // 生成差异可视化HTML
+        function generateMergedView(operations) {
+            const { mergedOps } = mergeOperations(operations);
+            let html = '';
+            
+            mergedOps.forEach(op => {
+                switch (op.type) {
+                    case 'match': html += op.char; break;
+                    case 'delete-group': html += `<span class="diff-delete">${op.chars}</span>`; break;
+                    case 'insert-group': html += `<span class="diff-insert">${op.chars}</span>`; break;
+                    case 'replace-group': html += `<span class="diff-replace-old">${op.oldChars}</span><span class="diff-replace-new">${op.newChars}</span>`; break;
+                }
+            });
+            
+            return { html };
+        }
+
+        // 生成修正说明HTML
+        function generateExplanationsHtml(explanationText) {
+            if (!explanationText?.trim()) {
+                return '<p class="text-gray-500 italic">没有修正说明。</p>';
+            }
+            
+            const lines = explanationText.trim().split('\n');
+            if (lines.length === 1) return `<p>${lines[0]}</p>`;
+            
+            let html = '<ol class="list-decimal space-y-4 pl-5">';
+            lines.forEach(line => {
+                if (!line.trim()) return;
+                html += `<li class="flex items-start">${line}</li>`;
+            });
+            html += '</ol>';
+            return html;
+        }
+        
+        // 生成引用原文HTML（增加了出处source信息）
+        function generateClosestReferenceHtml(reference) {
+            if (!reference || (!reference.content && !reference.doctitle)) {
+                return '<p class="text-gray-500 italic">没有找到引用原文</p>';
+            }
+            
+            // 收集元数据（时间、地点和出处）
+            const metadata = [];
+            if (reference.speechtime) metadata.push(`讲话时间: ${reference.speechtime}`);
+            if (reference.location) metadata.push(`地点: ${reference.location}`);
+            if (reference.pubdate) metadata.push(`发布时间: ${reference.pubdate}`);
+            if (reference.source) metadata.push(`出处: ${reference.source}`);
+            
+            return `
+                <div class="border border-gray-200 rounded-lg overflow-hidden">
+                    ${reference.doctitle ? `
+                        <div class="px-3 py-2 bg-gray-50 border-b border-gray-100 text-sm font-medium">
+                            <strong>${reference.doctitle}</strong>
+                        </div>
+                    ` : ''}
+                    
+                    ${metadata.length > 0 ? `
+                        <div class="px-3 py-1 bg-gray-50 border-b border-gray-100 reference-metadata">
+                            ${metadata.join(' | ')}
+                        </div>
+                    ` : ''}
+                    
+                    <div class="p-3 text-sm whitespace-pre-line">${reference.content || '无内容'}</div>
+                </div>
+            `;
+        }
+        
+        // 创建引用链接
+        function createReferenceLink(reference) {
+            if (!reference || (!reference.content && !reference.doctitle)) return '';
+            
+            elements.referenceModalContent.innerHTML = generateClosestReferenceHtml(reference);
+            return `
+                <button onclick="window.showReferenceModal()" 
+                    class="text-primary hover:text-primary/80 text-sm font-medium flex items-center transition-colors">
+                    <i class="fa fa-link mr-1"></i>引用原文
+                </button>
+            `;
+        }
+        
+        // 设置搜索处理函数
+        function setupSearchHandlers() {
+            // 模式切换事件
+            elements.verifyModeCheckbox.addEventListener('change', function() {
+                checkInputContent();
+            });
+            
+            // 清除按钮
+            elements.clearButton.addEventListener('click', () => {
+                clearInputContent();
+                document.getElementById('search-type-speech').checked = true;
+                elements.selectedKnowledgeSource.textContent = '知识源: 重要讲话';
+                elements.verifyModeCheckbox.checked = true;
+                elements.useLlmEnhancement.checked = true;
+                
+                checkInputContent();
+                
+                [elements.loadingIndicator, elements.resultsContainer, elements.errorMessage].forEach(el => el.classList.add('hidden'));
+                elements.initialState.classList.remove('hidden');
+                
+                searchResultsData = null;
+                elements.showEntriesLink.classList.add('hidden');
+            });
+            
+            // 显示/隐藏元素
+            const showSection = (section) => {
+                section.classList.remove('hidden');
+                section.classList.add('animate-fadeIn');
+                setTimeout(() => section.classList.remove('animate-fadeIn'), 300);
+            };
+            
+            const hideSection = (section) => section.classList.add('hidden');
+            
+            // 获取选中的搜索类型
+            const getSelectedSearchType = () => {
+                for (const radio of elements.searchTypeRadios) {
+                    if (radio.checked) return radio.value;
+                }
+                return 'speech';
+            };
+            
+            // 执行搜索
+            const performSearch = async () => {
+                const searchText = getCurrentModeTextContent();
+                if (!searchText) return;
+                
+                currentSearchType = getSelectedSearchType();
+                const useLlm = elements.useLlmEnhancement.checked;
+                const functionType = elements.verifyModeCheckbox.checked ? 'verify' : 'qa';
+                
+                // 固定时间参数为0
+                const startTimeValue = 0;
+                const endTimeValue = 0;
+                
+                // 显示加载状态
+                [elements.initialState, elements.resultsContainer, elements.errorMessage].forEach(hideSection);
+                showSection(elements.loadingIndicator);
+                
+                try {
+                    const requestStartTime = performance.now();
+                    const requestData = {
+                        text_to_search: searchText,
+                        use_llm_enhancement: useLlm,
+                        function_type: functionType
+                    };
+                    
+                    // 无论搜索类型，都添加时间参数为0
+                    requestData.start_time = startTimeValue;
+                    requestData.end_time = endTimeValue;
+                    
+                    const response = await fetch(apiUrls[currentSearchType], {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(requestData),
+                        timeout: useLlm ? 60000 : 30000
+                    });
+                    
+                    const result = await response.json();
+                    const requestEndTime = performance.now();
+                    
+                    if (!response.ok) {
+                        throw new Error(result.error || `服务器错误: ${response.status}`);
+                    }
+                    
+                    // 保存结果数据
+                    searchResultsData = {
+                        ...result,
+                        function_type: functionType,
+                        processing_time_seconds: result.processing_time_seconds || (requestEndTime - requestStartTime) / 1000,
+                        use_llm_enhancement: useLlm,
+                        api_type: currentSearchType,
+                        original_text: searchText,
+                        time_range: {
+                            start_time: startTimeValue,
+                            end_time: endTimeValue
+                        }
+                    };
+                    
+                    displayResults(searchResultsData);
+                    
+                } catch (error) {
+                    hideSection(elements.loadingIndicator);
+                    elements.errorDetails.textContent = error.message;
+                    showSection(elements.errorMessage);
+                    elements.showEntriesLink.classList.add('hidden');
+                }
+            };
+            
+            // 显示结果
+            const displayResults = (data) => {
+                hideSection(elements.loadingIndicator);
+                
+                elements.resultStats.textContent = `找到 ${data.result_count} 条结果`;
+                elements.processingTime.textContent = `耗时: ${data.processing_time_seconds.toFixed(2)} 秒`;
+                
+                const isVerifyMode = data.function_type === 'verify';
+                const referenceLink = createReferenceLink(data.closest_reference);
+                
+                // 显示/隐藏中间结果链接
+                elements.showEntriesLink.classList.toggle('hidden', !(data.result_count > 0 && data.items?.length));
+                
+                if (isVerifyMode && data.processed_content?.trim() && data.original_text?.trim()) {
+                    // 显示差异可视化
+                    elements.diffVisualizationContainer.classList.remove('hidden');
+                    elements.processedContentContainer.classList.add('hidden');
+                    
+                    const operations = getEditOperations(data.original_text, data.processed_content);
+                    const { html } = generateMergedView(operations);
+                    
+                    elements.diffMergedView.innerHTML = html;
+                    elements.diffReferenceLinkContainer.innerHTML = referenceLink;
+                    
+                    const explanationText = data.verify_components?.explanation || '';
+                    elements.diffExplanations.innerHTML = generateExplanationsHtml(explanationText);
+                } else {
+                    // 显示处理结果
+                    elements.diffVisualizationContainer.classList.add('hidden');
+                    elements.processedContentContainer.classList.remove('hidden');
+                    
+                    if (data.processed_content?.trim()) {
+                        elements.processedContent.innerHTML = `<div>${data.processed_content.trim().replace(/\n/g, '<br>')}</div>`;
+                    } else if (data.items?.length) {
+                        elements.processedContent.innerHTML = `<div>${data.items[0].content.trim().replace(/\n/g, '<br>')}</div>`;
+                    } else {
+                        elements.processedContent.innerHTML = '<p class="text-gray-500">无检索结果</p>';
+                    }
+                    
+                    elements.processedReferenceLinkContainer.innerHTML = referenceLink;
+                }
+                
+                // 显示/隐藏无结果状态
+                elements.noResults.classList.toggle('hidden', !(data.result_count === 0 || !data.items?.length));
+                showSection(elements.resultsContainer);
+            };
+            
+            // 绑定搜索事件
+            elements.searchButton.addEventListener('click', performSearch);
+            elements.retryButton.addEventListener('click', performSearch);
+            elements.tryAgainButton.addEventListener('click', () => {
+                elements.useLlmEnhancement.checked = true;
+                performSearch();
+            });
+            
+            // 按Enter键搜索
+            document.addEventListener('keydown', e => {
+                if (e.key === 'Enter' && e.ctrlKey && !elements.searchButton.disabled) {
+                    e.preventDefault();
+                    performSearch();
+                }
+            });
+        }
+        
+        // 显示中间结果（增加了出处source信息）
+        function displayIntermediateResults(data) {
+            // 重置中间结果页面
+            elements.entriesSubpages.forEach(page => {
+                page.innerHTML = '';
+                page.classList.add('hidden');
+            });
+            elements.entriesDefaultContent.classList.remove('hidden');
+            elements.entriesSubnavBtns.forEach(btn => btn.classList.remove('opacity-50', 'pointer-events-none', 'cursor-not-allowed'));
+            
+            // 增强材料生成页面
+            if (data.intermediate_results?.generation_info && data.use_llm_enhancement) {
+                const genData = data.intermediate_results.generation_info;
+                let genDetails = `
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                        <div class="bg-gray-50 p-3 rounded-lg">
+                            <div class="text-sm text-gray-500 mb-1">生成总数</div>
+                            <div class="font-medium">${genData.total_generated}</div>
+                        </div>
+                        <div class="bg-gray-50 p-3 rounded-lg">
+                            <div class="text-sm text-gray-500 mb-1">有效生成</div>
+                            <div class="font-medium">${genData.valid_generated}</div>
+                        </div>
+                        <div class="bg-gray-50 p-3 rounded-lg">
+                            <div class="text-sm text-gray-500 mb-1">生成错误</div>
+                            <div class="font-medium ${genData.generation_errors > 0 ? 'text-red-600' : ''}">${genData.generation_errors}</div>
+                        </div>
+                    </div>
+                `;
+                
+                if (genData.processed_original_text) {
+                    genDetails += `
+                        <div class="mb-4">
+                            <div class="text-sm font-medium mb-2">原始文本</div>
+                            <div class="bg-gray-50 p-3 rounded-lg text-sm">${genData.processed_original_text}</div>
+                        </div>
+                    `;
+                }
+                
+                if (genData.generated_materials?.length) {
+                    genDetails += `
+                        <div>
+                            <div class="text-sm font-medium mb-2">生成的补充材料</div>
+                            <div class="space-y-3">
+                                ${genData.generated_materials.map((material, idx) => `
+                                    <div class="bg-gray-50 p-3 rounded-lg text-sm">
+                                        <div class="text-xs text-gray-500 mb-1">补充材料 #${idx+1}</div>
+                                        ${material}
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                document.getElementById('generation-info-page').innerHTML = genDetails;
+            } else {
+                document.querySelector('[data-entries-page="generation-info"]').classList.add('opacity-50', 'pointer-events-none', 'cursor-not-allowed');
+            }
+            
+            // 相关词条页面（增加了出处source信息）
+            if (data.items?.length) {
+                let entriesHtml = `
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                        <div class="bg-gray-50 p-3 rounded-lg">
+                            <div class="text-sm text-gray-500 mb-1">总词条数</div>
+                            <div class="font-medium">${data.items.length}</div>
+                        </div>
+                        <div class="bg-gray-50 p-3 rounded-lg">
+                            <div class="text-sm text-gray-500 mb-1">最高分数</div>
+                            <div class="font-medium">${Math.max(...data.items.map(i => i.score)) || 0}</div>
+                        </div>
+                    </div>
+                    
+                    <div class="space-y-4 max-h-[calc(100vh-400px)] overflow-y-auto pr-2">
+                        ${data.items.map((item, idx) => `
+                            <div class="border border-gray-200 rounded-lg overflow-hidden">
+                                <div class="px-3 py-2 bg-gray-50 border-b border-gray-100 flex flex-wrap justify-between items-center gap-2">
+                                    <div class="text-sm font-medium">词条 #${idx+1}</div>
+                                    <div class="text-xs text-gray-500 flex flex-wrap gap-x-4 gap-y-1">
+                                        分数: ${item.score || 0}
+                                        ${item.location ? ` | 位置: ${item.location}` : ''}
+                                        ${data.api_type === 'speech' && item.speechtime ? ` | 讲话时间: ${item.speechtime}` : ''}
+                                        ${data.api_type === 'speech' && item.pubdate ? ` | 发布时间: ${item.pubdate}` : ''}
+                                        ${item.source ? ` | 出处: ${item.source}` : ''}
+                                    </div>
+                                </div>
+                                ${item.doctitle ? `
+                                    <div class="px-3 py-2 bg-gray-50 border-b border-gray-100 text-sm font-medium">
+                                        <strong>${item.doctitle}</strong>
+                                    </div>
+                                ` : ''}
+                                <div class="p-3 text-sm whitespace-pre-line">${item.content || '无内容'}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+                
+                document.getElementById('search-entries-page').innerHTML = entriesHtml;
+            } else {
+                document.querySelector('[data-entries-page="search-entries"]').classList.add('opacity-50', 'pointer-events-none', 'cursor-not-allowed');
+            }
+        }
+        
+        // 初始化
+        function init() {
+            initCollapsibleSections();
+            initKnowledgeSourceDropdown(); // 初始化知识源下拉菜单
+            initModals();
+            initEntriesSubnav();
+            initLocalRichTextEditor(); // 初始化本地富文本编辑器
+            setupSearchHandlers();
+        }
+        
+        // 确保DOM加载完成后初始化
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body></html>
